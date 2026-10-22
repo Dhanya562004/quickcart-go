@@ -3,7 +3,6 @@ package middleware
 import (
 	"bytes"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -125,8 +124,4 @@ func TestCORSMiddleware(t *testing.T) {
 	r.ServeHTTP(wGet, reqGet)
 	assert.Equal(t, http.StatusOK, wGet.Code)
 	assert.Equal(t, "*", wGet.Header().Get("Access-Control-Allow-Origin"))
-}
-
-func discardLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
