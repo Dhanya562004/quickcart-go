@@ -10,9 +10,13 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	_ "time/tzdata"
 
+	"github.com/Dhanya562004/quickcart-go/internal/cart"
+	"github.com/Dhanya562004/quickcart-go/internal/catalog"
 	"github.com/Dhanya562004/quickcart-go/internal/config"
 	"github.com/Dhanya562004/quickcart-go/internal/db"
+	"github.com/Dhanya562004/quickcart-go/internal/order"
 	"github.com/Dhanya562004/quickcart-go/internal/platform/database"
 	"github.com/Dhanya562004/quickcart-go/internal/platform/logger"
 	"github.com/Dhanya562004/quickcart-go/internal/platform/middleware"
@@ -21,7 +25,7 @@ import (
 
 var (
 	// Version can be injected at build time via -ldflags="-X main.Version=..."
-	Version = "1.0.0-phase1"
+	Version = "1.0.0-phase2"
 )
 
 func main() {
@@ -170,6 +174,24 @@ func SetupRouter(cfg *config.Config, log *slog.Logger, dbConn *database.DB, quer
 				"timestamp":   time.Now().UTC(),
 			})
 		})
+
+		// Register Catalog, Cart, and Order domain modules when database is connected
+		if dbConn != nil && dbConn.Pool != nil && queries != nil {
+			catRepo := catalog.NewRepository(queries)
+			catSvc := catalog.NewService(catRepo)
+			catHandler := catalog.NewHandler(catSvc)
+			catHandler.RegisterRoutes(v1)
+
+			cartRepo := cart.NewRepository(queries)
+			cartSvc := cart.NewService(cartRepo)
+			cartHandler := cart.NewHandler(cartSvc)
+			cartHandler.RegisterRoutes(v1)
+
+			orderRepo := order.NewRepository(dbConn.Pool)
+			orderSvc := order.NewService(orderRepo, cartSvc)
+			orderHandler := order.NewHandler(orderSvc)
+			orderHandler.RegisterRoutes(v1)
+		}
 	}
 
 	return r

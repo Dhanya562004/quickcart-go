@@ -10,7 +10,7 @@ services:
       POSTGRES_PASSWORD: quickcart_secret
       POSTGRES_DB: quickcart
     ports:
-      - "5432:5432"
+      - "${DB_HOST_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ../migrations/000001_init_schema.up.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
