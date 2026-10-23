@@ -20,12 +20,14 @@ import (
 	"github.com/Dhanya562004/quickcart-go/internal/platform/database"
 	"github.com/Dhanya562004/quickcart-go/internal/platform/logger"
 	"github.com/Dhanya562004/quickcart-go/internal/platform/middleware"
+	"github.com/Dhanya562004/quickcart-go/internal/queue"
+	"github.com/Dhanya562004/quickcart-go/internal/worker"
 	"github.com/gin-gonic/gin"
 )
 
 var (
 	// Version can be injected at build time via -ldflags="-X main.Version=..."
-	Version = "1.0.0-phase2"
+	Version = "1.0.0-phase3"
 )
 
 func main() {
@@ -60,10 +62,25 @@ func main() {
 	// Initialize sqlc queries wrapper
 	queries := db.New(dbConn.Pool)
 
-	// 4. Setup Gin HTTP router
+	// 4. Initialize Queue and Concurrency Worker Pool
+	jobQueue := queue.NewChannelQueue(1000)
+	workerPool := worker.NewWorkerPool(worker.PoolConfig{
+		WorkerCount:  cfg.WorkerPoolSize,
+		DrainTimeout: cfg.WorkerDrainTimeout,
+	}, jobQueue, log)
+
+	workerPool.RegisterHandler(queue.JobTypeOrderConfirm, worker.DefaultOrderConfirmHandler(log))
+	workerPool.RegisterHandler(queue.JobTypeReservationReclaim, worker.DefaultReservationReclaimHandler(log))
+
+	if err := workerPool.Start(ctx); err != nil {
+		log.Error("Failed to start background worker pool", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
+	// 5. Setup Gin HTTP router
 	router := SetupRouter(cfg, log, dbConn, queries)
 
-	// 5. Configure standard HTTP server with production timeouts
+	// 6. Configure standard HTTP server with production timeouts
 	srv := &http.Server{
 		Addr:              cfg.Address(),
 		Handler:           router,
@@ -73,7 +90,7 @@ func main() {
 		IdleTimeout:       60 * time.Second,
 	}
 
-	// 6. Start server in a background goroutine
+	// 7. Start server in a background goroutine
 	serverErrors := make(chan error, 1)
 	go func() {
 		log.Info("HTTP server listening", slog.String("address", srv.Addr))
@@ -82,7 +99,7 @@ func main() {
 		}
 	}()
 
-	// 7. Trapping OS signals for graceful shutdown
+	// 8. Trapping OS signals for graceful shutdown
 	shutdownChan := make(chan os.Signal, 1)
 	signal.Notify(shutdownChan, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 
@@ -97,10 +114,15 @@ func main() {
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 		defer shutdownCancel()
 
-		// Gracefully drain active HTTP connections
+		// Step 1: Gracefully drain active HTTP connections
 		if err := srv.Shutdown(shutdownCtx); err != nil {
-			log.Error("Graceful shutdown failed, forcing close", slog.String("error", err.Error()))
+			log.Error("HTTP graceful shutdown failed, forcing close", slog.String("error", err.Error()))
 			_ = srv.Close()
+		}
+
+		// Step 2: Gracefully drain background worker pool
+		if err := workerPool.Stop(shutdownCtx); err != nil {
+			log.Error("Worker pool shutdown failed", slog.String("error", err.Error()))
 		}
 
 		log.Info("QuickCart server gracefully terminated")
