@@ -3,11 +3,14 @@ global:
   evaluation_interval: 5s
 
 scrape_configs:
-  - job_name: "quickcart-api"
+  - job_name: "quickcart-api-cluster"
     metrics_path: "/metrics"
     bearer_token: "quickcart-metrics-scrape-token"
     static_configs:
-      - targets: ["quickcart-api:8080"]
+      - targets:
+          - "quickcart-api-1:8080"
+          - "quickcart-api-2:8080"
+          - "quickcart-api-3:8080"
         labels:
           service: "quickcart-engine"
           env: "production"

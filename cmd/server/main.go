@@ -101,8 +101,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 7. Initialize SSE Hub for live order tracking
-	sseHub := tracking.NewSSEHub()
+	// 7. Initialize distributed SSE Hub for live order tracking with Redis Pub/Sub
+	instanceID := os.Getenv("INSTANCE_ID")
+	if instanceID == "" {
+		instanceID = fmt.Sprintf("quickcart-%d", time.Now().UnixNano())
+	}
+	sseHub := tracking.NewDistributedSSEHub(context.Background(), redisClient.Raw(), instanceID, log)
 
 	// 8. Setup Gin HTTP router
 	router := SetupRouter(cfg, log, dbConn, queries, redisClient, sseHub)
@@ -120,7 +124,7 @@ func main() {
 	// 10. Start server in a background goroutine
 	serverErrors := make(chan error, 1)
 	go func() {
-		log.Info("HTTP server listening", slog.String("address", srv.Addr))
+		log.Info("HTTP server listening", slog.String("address", srv.Addr), slog.String("instance_id", instanceID))
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErrors <- err
 		}
@@ -154,6 +158,9 @@ func main() {
 		if err := workerPool.Stop(shutdownCtx); err != nil {
 			log.Error("Worker pool shutdown failed", slog.String("error", err.Error()))
 		}
+
+		// Step 4: Close distributed SSE hub
+		sseHub.Close()
 
 		log.Info("QuickCart server gracefully terminated")
 	}

@@ -122,10 +122,15 @@ func (r *RateLimiter) Allow(
 // Middleware creates a Gin middleware enforcing the specified rate limit per user/IP.
 func (r *RateLimiter) Middleware(limit int, window time.Duration) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Identify user by X-User-ID if present; otherwise fallback to Client IP
+		// Identify user by authenticated context first; then fallback to X-User-ID or Client IP
 		var identifier string
-		userID := c.GetHeader("X-User-ID")
-		if userID != "" {
+		if rawID, exists := c.Get("auth_user_id"); exists {
+			if uid, ok := rawID.(uuid.UUID); ok {
+				identifier = "user:" + uid.String()
+			} else {
+				identifier = fmt.Sprintf("user:%v", rawID)
+			}
+		} else if userID := c.GetHeader("X-User-ID"); userID != "" {
 			identifier = "user:" + userID
 		} else {
 			identifier = "ip:" + c.ClientIP()

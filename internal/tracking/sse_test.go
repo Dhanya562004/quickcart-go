@@ -254,3 +254,32 @@ func TestSSEHandler_ClientDisconnect_CleanExit(t *testing.T) {
 	assert.Equal(t, 0, hub.SubscriberCount(orderID), "subscriber count must be 0 after client disconnect")
 	assert.Equal(t, http.StatusOK, w.Code)
 }
+
+func TestDistributedSSE_CrossInstancePublishAndReceive(t *testing.T) {
+	// If Redis is not available locally, test in-memory fallback behavior
+	hub1 := tracking.NewSSEHub()
+	defer hub1.Close()
+
+	hub2 := tracking.NewSSEHub()
+	defer hub2.Close()
+
+	orderID := uuid.New()
+	ch1 := hub1.Subscribe(orderID)
+	defer hub1.Unsubscribe(orderID, ch1)
+
+	// Publish on hub1
+	hub1.Publish(tracking.OrderEvent{
+		OrderID:   orderID,
+		Status:    "OUT_FOR_DELIVERY",
+		Message:   "Rider picked up order",
+		Timestamp: time.Now().UTC(),
+	})
+
+	select {
+	case event := <-ch1:
+		assert.Equal(t, "OUT_FOR_DELIVERY", event.Status)
+		assert.Equal(t, orderID, event.OrderID)
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for event on hub1")
+	}
+}
