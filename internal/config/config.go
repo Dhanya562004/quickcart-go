@@ -39,6 +39,10 @@ type Config struct {
 	// Redis configuration
 	RedisURL string `json:"redis_url"`
 
+	// Rate Limiting configuration
+	RateLimitRequests int           `json:"rate_limit_requests"`
+	RateLimitWindow   time.Duration `json:"rate_limit_window"`
+
 	// Concurrency Worker Pool
 	WorkerPoolSize     int           `json:"worker_pool_size"`
 	WorkerDrainTimeout time.Duration `json:"worker_drain_timeout"`
@@ -59,6 +63,8 @@ func Load() (*Config, error) {
 		DBMaxConnIdleTime:  getEnvDuration("DB_MAX_CONN_IDLE_TIME", 30*time.Minute),
 		DBHealthCheckDelay: getEnvDuration("DB_HEALTH_CHECK_DELAY", 1*time.Minute),
 		RedisURL:           getEnv("REDIS_URL", "redis://localhost:6379/0"),
+		RateLimitRequests: getEnvInt("RATE_LIMIT_REQUESTS", 100),
+		RateLimitWindow:   getEnvDuration("RATE_LIMIT_WINDOW", 1*time.Minute),
 		WorkerPoolSize:     getEnvInt("WORKER_POOL_SIZE", 4),
 		WorkerDrainTimeout: getEnvDuration("WORKER_DRAIN_TIMEOUT", 5*time.Second),
 	}
@@ -109,6 +115,14 @@ func (c *Config) Validate() error {
 
 	if c.DBMinConns > c.DBMaxConns {
 		return fmt.Errorf("DB_MIN_CONNS (%d) cannot exceed DB_MAX_CONNS (%d)", c.DBMinConns, c.DBMaxConns)
+	}
+
+	if c.RateLimitRequests <= 0 {
+		return errors.New("RATE_LIMIT_REQUESTS must be greater than 0")
+	}
+
+	if c.RateLimitWindow <= 0 {
+		return errors.New("RATE_LIMIT_WINDOW must be greater than 0")
 	}
 
 	if c.WorkerPoolSize <= 0 {

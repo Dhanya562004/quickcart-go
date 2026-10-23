@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Dhanya562004/quickcart-go/internal/config"
 	"github.com/gin-gonic/gin"
@@ -29,7 +30,7 @@ func TestSetupRouter_Healthz(t *testing.T) {
 		ServerPort:  "8080",
 	}
 
-	router := SetupRouter(cfg, getTestLogger(), nil, nil)
+	router := SetupRouter(cfg, getTestLogger(), nil, nil, nil, nil)
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/healthz", nil)
@@ -53,7 +54,7 @@ func TestSetupRouter_Readyz_NotReady(t *testing.T) {
 	}
 
 	// dbConn is nil -> readyz should return 503 Service Unavailable
-	router := SetupRouter(cfg, getTestLogger(), nil, nil)
+	router := SetupRouter(cfg, getTestLogger(), nil, nil, nil, nil)
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/readyz", nil)
@@ -75,7 +76,7 @@ func TestSetupRouter_SystemInfo(t *testing.T) {
 		ServerPort:  "8080",
 	}
 
-	router := SetupRouter(cfg, getTestLogger(), nil, nil)
+	router := SetupRouter(cfg, getTestLogger(), nil, nil, nil, nil)
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/api/v1/system/info", nil)
@@ -98,7 +99,7 @@ func TestSetupRouter_NotFound(t *testing.T) {
 		ServerPort:  "8080",
 	}
 
-	router := SetupRouter(cfg, getTestLogger(), nil, nil)
+	router := SetupRouter(cfg, getTestLogger(), nil, nil, nil, nil)
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/unknown-endpoint-404", nil)
@@ -106,4 +107,24 @@ func TestSetupRouter_NotFound(t *testing.T) {
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
 	assert.NotEmpty(t, w.Header().Get("X-Request-ID"))
+}
+
+func TestSetupRouter_RateLimiting_FailOpen_WhenRedisNil(t *testing.T) {
+	cfg := &config.Config{
+		Environment:       config.EnvDevelopment,
+		LogLevel:          "info",
+		ServerPort:        "8080",
+		RateLimitRequests: 10,
+		RateLimitWindow:   1 * time.Minute,
+	}
+
+	// With nil Redis client, rate limiter is bypassed and system remains fully responsive
+	router := SetupRouter(cfg, getTestLogger(), nil, nil, nil, nil)
+
+	for i := 0; i < 15; i++ {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, "/api/v1/system/info", nil)
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	}
 }

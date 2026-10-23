@@ -24,6 +24,8 @@ func TestConfig_Defaults(t *testing.T) {
 	assert.Equal(t, 10*time.Second, cfg.ShutdownTimeout)
 	assert.Equal(t, int32(25), cfg.DBMaxConns)
 	assert.Equal(t, int32(5), cfg.DBMinConns)
+	assert.Equal(t, 100, cfg.RateLimitRequests)
+	assert.Equal(t, 1*time.Minute, cfg.RateLimitWindow)
 	assert.Equal(t, 4, cfg.WorkerPoolSize)
 	assert.Equal(t, 5*time.Second, cfg.WorkerDrainTimeout)
 	assert.Equal(t, "0.0.0.0:8080", cfg.Address())
@@ -84,6 +86,20 @@ func TestConfig_Validation(t *testing.T) {
 				c.DBMaxConns = 10
 			},
 			expectedErr: "DB_MIN_CONNS (30) cannot exceed DB_MAX_CONNS (10)",
+		},
+		{
+			name: "RateLimitRequests zero",
+			modify: func(c *Config) {
+				c.RateLimitRequests = 0
+			},
+			expectedErr: "RATE_LIMIT_REQUESTS must be greater than 0",
+		},
+		{
+			name: "RateLimitWindow zero",
+			modify: func(c *Config) {
+				c.RateLimitWindow = 0
+			},
+			expectedErr: "RATE_LIMIT_WINDOW must be greater than 0",
 		},
 		{
 			name: "WorkerPoolSize zero",
