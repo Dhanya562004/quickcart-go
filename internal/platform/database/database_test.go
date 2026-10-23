@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/Dhanya562004/quickcart-go/internal/config"
 	"github.com/jackc/pgx/v5"
@@ -63,3 +64,24 @@ func TestNewPool_InvalidURL(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse database configuration")
 }
+
+func TestNewPool_Integration(t *testing.T) {
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("skipping integration test; DATABASE_URL not set")
+	}
+	cfg := &config.Config{
+		DatabaseURL:        dbURL,
+		DBMaxConns:         5,
+		DBMinConns:         1,
+		DBHealthCheckDelay: time.Minute,
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	pool, err := NewPool(context.Background(), cfg, logger)
+	require.NoError(t, err)
+	defer pool.Close()
+
+	err = pool.Ping(context.Background())
+	require.NoError(t, err)
+}
+

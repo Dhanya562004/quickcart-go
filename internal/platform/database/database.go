@@ -24,11 +24,21 @@ func NewPool(ctx context.Context, cfg *config.Config, log *slog.Logger) (*DB, er
 	}
 
 	// Apply production-grade pool sizing and lifetime parameters
-	poolConfig.MaxConns = cfg.DBMaxConns
-	poolConfig.MinConns = cfg.DBMinConns
-	poolConfig.MaxConnLifetime = cfg.DBMaxConnLifetime
-	poolConfig.MaxConnIdleTime = cfg.DBMaxConnIdleTime
-	poolConfig.HealthCheckPeriod = cfg.DBHealthCheckDelay
+	if cfg.DBMaxConns > 0 {
+		poolConfig.MaxConns = cfg.DBMaxConns
+	}
+	if cfg.DBMinConns > 0 {
+		poolConfig.MinConns = cfg.DBMinConns
+	}
+	if cfg.DBMaxConnLifetime > 0 {
+		poolConfig.MaxConnLifetime = cfg.DBMaxConnLifetime
+	}
+	if cfg.DBMaxConnIdleTime > 0 {
+		poolConfig.MaxConnIdleTime = cfg.DBMaxConnIdleTime
+	}
+	if cfg.DBHealthCheckDelay > 0 {
+		poolConfig.HealthCheckPeriod = cfg.DBHealthCheckDelay
+	}
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
