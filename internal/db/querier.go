@@ -7,21 +7,69 @@ package db
 import (
 	"context"
 
-	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Querier interface {
+	CancelOrderAtomic(ctx context.Context, arg CancelOrderAtomicParams) (Order, error)
+	// Health and Diagnostics Queries
 	CheckDatabaseHealth(ctx context.Context) (int32, error)
-	GetDatabaseVersion(ctx context.Context) (string, error)
-	GetStoreInventory(ctx context.Context, arg GetStoreInventoryParams) (StoreInventory, error)
-	ReserveInventoryAtomic(ctx context.Context, arg ReserveInventoryAtomicParams) (ReserveInventoryAtomicRow, error)
+	ClearCart(ctx context.Context, cartID pgtype.UUID) error
+	// Transition from RESERVED -> CONFIRMED guarded by status check
+	ConfirmReservation(ctx context.Context, id pgtype.UUID) (ConfirmReservationRow, error)
+	CreateCart(ctx context.Context, arg CreateCartParams) (Cart, error)
+	CreateCategory(ctx context.Context, arg CreateCategoryParams) (Category, error)
+	CreateDarkStore(ctx context.Context, arg CreateDarkStoreParams) (DarkStore, error)
+	CreateIdempotencyRecord(ctx context.Context, arg CreateIdempotencyRecordParams) (IdempotencyKey, error)
 	CreateInventoryReservation(ctx context.Context, arg CreateInventoryReservationParams) (InventoryReservation, error)
-	ConfirmReservation(ctx context.Context, id uuid.UUID) (ConfirmReservationRow, error)
-	ReleaseReservation(ctx context.Context, id uuid.UUID) (ReleaseReservationRow, error)
-	RestoreInventoryAtomic(ctx context.Context, arg RestoreInventoryAtomicParams) (RestoreInventoryAtomicRow, error)
+	// Order Domain Queries
+	CreateOrder(ctx context.Context, arg CreateOrderParams) (Order, error)
+	CreateOrderItem(ctx context.Context, arg CreateOrderItemParams) (OrderItem, error)
+	CreateProduct(ctx context.Context, arg CreateProductParams) (Product, error)
+	// Finalizes stock consumption upon order fulfillment
 	DeductReservedInventoryAtomic(ctx context.Context, arg DeductReservedInventoryAtomicParams) (DeductReservedInventoryAtomicRow, error)
+	DeleteCartItem(ctx context.Context, arg DeleteCartItemParams) error
+	// Cart Domain Queries
+	GetCartByUserID(ctx context.Context, userID pgtype.UUID) (Cart, error)
+	GetCartItems(ctx context.Context, cartID pgtype.UUID) ([]GetCartItemsRow, error)
+	GetCategoryByID(ctx context.Context, id pgtype.UUID) (Category, error)
+	GetDarkStoreByID(ctx context.Context, id pgtype.UUID) (DarkStore, error)
+	GetDatabaseVersion(ctx context.Context) (string, error)
+	// Idempotency Domain Queries
+	GetIdempotencyRecord(ctx context.Context, arg GetIdempotencyRecordParams) (IdempotencyKey, error)
+	GetOrderByID(ctx context.Context, id pgtype.UUID) (Order, error)
+	GetOrderByUserAndIdempotencyKey(ctx context.Context, arg GetOrderByUserAndIdempotencyKeyParams) (Order, error)
+	GetOrderItemsByOrderID(ctx context.Context, orderID pgtype.UUID) ([]GetOrderItemsByOrderIDRow, error)
+	GetOrderStatusHistoryByOrderID(ctx context.Context, orderID pgtype.UUID) ([]OrderStatusHistory, error)
+	GetProductByID(ctx context.Context, id pgtype.UUID) (Product, error)
+	GetReservationsByOrderID(ctx context.Context, orderID pgtype.UUID) ([]InventoryReservation, error)
+	// Core Inventory and Reservation Queries (Zero-Overselling Engine)
+	GetStoreInventory(ctx context.Context, arg GetStoreInventoryParams) (StoreInventory, error)
+	InsertOrderStatusHistory(ctx context.Context, arg InsertOrderStatusHistoryParams) (OrderStatusHistory, error)
+	// Catalog Domain Queries
+	ListCategories(ctx context.Context) ([]Category, error)
+	ListDarkStores(ctx context.Context) ([]DarkStore, error)
+	ListOrdersByUserID(ctx context.Context, arg ListOrdersByUserIDParams) ([]Order, error)
+	ListProductsByStore(ctx context.Context, arg ListProductsByStoreParams) ([]ListProductsByStoreRow, error)
+	// Transition from RESERVED -> EXPIRED guarded by status check
+	MarkReservationExpired(ctx context.Context, id pgtype.UUID) (MarkReservationExpiredRow, error)
+	// Expiry worker claims up to $1 expired reservations safely using FOR UPDATE SKIP LOCKED
 	PickExpiredReservationsForUpdate(ctx context.Context, limit int32) ([]PickExpiredReservationsForUpdateRow, error)
-	MarkReservationExpired(ctx context.Context, id uuid.UUID) (MarkReservationExpiredRow, error)
+	// Transition from RESERVED -> RELEASED guarded by status check
+	ReleaseReservation(ctx context.Context, id pgtype.UUID) (ReleaseReservationRow, error)
+	ReleaseReservationsByOrderID(ctx context.Context, orderID pgtype.UUID) ([]InventoryReservation, error)
+	// Atomically decrements available_quantity and increments reserved_quantity.
+	// Condition available_quantity >= $3 prevents overselling at database tuple level.
+	ReserveInventoryAtomic(ctx context.Context, arg ReserveInventoryAtomicParams) (ReserveInventoryAtomicRow, error)
+	// Releases reservation back to available stock
+	RestoreInventoryAtomic(ctx context.Context, arg RestoreInventoryAtomicParams) (RestoreInventoryAtomicRow, error)
+	UpdateCartItemQuantity(ctx context.Context, arg UpdateCartItemQuantityParams) (CartItem, error)
+	UpdateCartStore(ctx context.Context, arg UpdateCartStoreParams) (Cart, error)
+	UpdateIdempotencyRecord(ctx context.Context, arg UpdateIdempotencyRecordParams) (IdempotencyKey, error)
+	UpdateOrderStatus(ctx context.Context, arg UpdateOrderStatusParams) (Order, error)
+	UpdateProduct(ctx context.Context, arg UpdateProductParams) (Product, error)
+	UpsertCartItem(ctx context.Context, arg UpsertCartItemParams) (CartItem, error)
+	UpsertStoreInventory(ctx context.Context, arg UpsertStoreInventoryParams) (StoreInventory, error)
 }
 
 var _ Querier = (*Queries)(nil)

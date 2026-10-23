@@ -1,11 +1,7 @@
-# syntax=docker/dockerfile:1
-
 # Build Stage
 FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
-
-RUN apk add --no-cache git ca-certificates tzdata
 
 # Cache dependencies
 COPY go.mod go.sum ./
@@ -17,7 +13,7 @@ COPY . .
 # Compile optimized static binary with embedded version metadata
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -trimpath \
-    -ldflags="-s -w -X 'main.Version=1.0.0'" \
+    -ldflags="-s -w -X 'main.Version=1.0.0-phase2'" \
     -o /app/quickcart-server ./cmd/server
 
 # Final Lightweight Runtime Stage
@@ -29,7 +25,6 @@ WORKDIR /app
 RUN addgroup -S quickcart && adduser -S quickcart -G quickcart
 
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=builder /app/quickcart-server /app/quickcart-server
 COPY --from=builder /app/migrations /app/migrations
 

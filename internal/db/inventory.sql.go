@@ -7,75 +7,42 @@ package db
 
 import (
 	"context"
-	"time"
 
-	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const getStoreInventory = `-- name: GetStoreInventory :one
-SELECT store_id, product_id, available_quantity, reserved_quantity, version, created_at, updated_at
-FROM store_inventories
-WHERE store_id = $1 AND product_id = $2
-`
-
-type GetStoreInventoryParams struct {
-	StoreID   uuid.UUID `json:"store_id"`
-	ProductID uuid.UUID `json:"product_id"`
-}
-
-func (q *Queries) GetStoreInventory(ctx context.Context, arg GetStoreInventoryParams) (StoreInventory, error) {
-	row := q.db.QueryRow(ctx, getStoreInventory, arg.StoreID, arg.ProductID)
-	var i StoreInventory
-	err := row.Scan(
-		&i.StoreID,
-		&i.ProductID,
-		&i.AvailableQuantity,
-		&i.ReservedQuantity,
-		&i.Version,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const reserveInventoryAtomic = `-- name: ReserveInventoryAtomic :one
-UPDATE store_inventories
+const confirmReservation = `-- name: ConfirmReservation :one
+UPDATE inventory_reservations
 SET 
-    available_quantity = available_quantity - $3,
-    reserved_quantity = reserved_quantity + $3,
-    version = version + 1,
+    status = 'CONFIRMED',
     updated_at = NOW()
 WHERE 
-    store_id = $1 
-    AND product_id = $2 
-    AND available_quantity >= $3
-RETURNING store_id, product_id, available_quantity, reserved_quantity, version, updated_at
+    id = $1 
+    AND status = 'RESERVED'
+RETURNING id, order_id, store_id, product_id, quantity, status, updated_at
 `
 
-type ReserveInventoryAtomicParams struct {
-	StoreID   uuid.UUID `json:"store_id"`
-	ProductID uuid.UUID `json:"product_id"`
-	Quantity  int32     `json:"quantity"`
+type ConfirmReservationRow struct {
+	ID        pgtype.UUID        `json:"id"`
+	OrderID   pgtype.UUID        `json:"order_id"`
+	StoreID   pgtype.UUID        `json:"store_id"`
+	ProductID pgtype.UUID        `json:"product_id"`
+	Quantity  int32              `json:"quantity"`
+	Status    string             `json:"status"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
-type ReserveInventoryAtomicRow struct {
-	StoreID           uuid.UUID `json:"store_id"`
-	ProductID         uuid.UUID `json:"product_id"`
-	AvailableQuantity int32     `json:"available_quantity"`
-	ReservedQuantity  int32     `json:"reserved_quantity"`
-	Version           int32     `json:"version"`
-	UpdatedAt         time.Time `json:"updated_at"`
-}
-
-func (q *Queries) ReserveInventoryAtomic(ctx context.Context, arg ReserveInventoryAtomicParams) (ReserveInventoryAtomicRow, error) {
-	row := q.db.QueryRow(ctx, reserveInventoryAtomic, arg.StoreID, arg.ProductID, arg.Quantity)
-	var i ReserveInventoryAtomicRow
+// Transition from RESERVED -> CONFIRMED guarded by status check
+func (q *Queries) ConfirmReservation(ctx context.Context, id pgtype.UUID) (ConfirmReservationRow, error) {
+	row := q.db.QueryRow(ctx, confirmReservation, id)
+	var i ConfirmReservationRow
 	err := row.Scan(
+		&i.ID,
+		&i.OrderID,
 		&i.StoreID,
 		&i.ProductID,
-		&i.AvailableQuantity,
-		&i.ReservedQuantity,
-		&i.Version,
+		&i.Quantity,
+		&i.Status,
 		&i.UpdatedAt,
 	)
 	return i, err
@@ -95,11 +62,11 @@ INSERT INTO inventory_reservations (
 `
 
 type CreateInventoryReservationParams struct {
-	OrderID   uuid.UUID `json:"order_id"`
-	StoreID   uuid.UUID `json:"store_id"`
-	ProductID uuid.UUID `json:"product_id"`
-	Quantity  int32     `json:"quantity"`
-	ExpiresAt time.Time `json:"expires_at"`
+	OrderID   pgtype.UUID        `json:"order_id"`
+	StoreID   pgtype.UUID        `json:"store_id"`
+	ProductID pgtype.UUID        `json:"product_id"`
+	Quantity  int32              `json:"quantity"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
 }
 
 func (q *Queries) CreateInventoryReservation(ctx context.Context, arg CreateInventoryReservationParams) (InventoryReservation, error) {
@@ -125,121 +92,6 @@ func (q *Queries) CreateInventoryReservation(ctx context.Context, arg CreateInve
 	return i, err
 }
 
-const confirmReservation = `-- name: ConfirmReservation :one
-UPDATE inventory_reservations
-SET 
-    status = 'CONFIRMED',
-    updated_at = NOW()
-WHERE 
-    id = $1 
-    AND status = 'RESERVED'
-RETURNING id, order_id, store_id, product_id, quantity, status, updated_at
-`
-
-type ConfirmReservationRow struct {
-	ID        uuid.UUID `json:"id"`
-	OrderID   uuid.UUID `json:"order_id"`
-	StoreID   uuid.UUID `json:"store_id"`
-	ProductID uuid.UUID `json:"product_id"`
-	Quantity  int32     `json:"quantity"`
-	Status    string    `json:"status"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-func (q *Queries) ConfirmReservation(ctx context.Context, id uuid.UUID) (ConfirmReservationRow, error) {
-	row := q.db.QueryRow(ctx, confirmReservation, id)
-	var i ConfirmReservationRow
-	err := row.Scan(
-		&i.ID,
-		&i.OrderID,
-		&i.StoreID,
-		&i.ProductID,
-		&i.Quantity,
-		&i.Status,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const releaseReservation = `-- name: ReleaseReservation :one
-UPDATE inventory_reservations
-SET 
-    status = 'RELEASED',
-    updated_at = NOW()
-WHERE 
-    id = $1 
-    AND status = 'RESERVED'
-RETURNING id, order_id, store_id, product_id, quantity, status, updated_at
-`
-
-type ReleaseReservationRow struct {
-	ID        uuid.UUID `json:"id"`
-	OrderID   uuid.UUID `json:"order_id"`
-	StoreID   uuid.UUID `json:"store_id"`
-	ProductID uuid.UUID `json:"product_id"`
-	Quantity  int32     `json:"quantity"`
-	Status    string    `json:"status"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-func (q *Queries) ReleaseReservation(ctx context.Context, id uuid.UUID) (ReleaseReservationRow, error) {
-	row := q.db.QueryRow(ctx, releaseReservation, id)
-	var i ReleaseReservationRow
-	err := row.Scan(
-		&i.ID,
-		&i.OrderID,
-		&i.StoreID,
-		&i.ProductID,
-		&i.Quantity,
-		&i.Status,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const restoreInventoryAtomic = `-- name: RestoreInventoryAtomic :one
-UPDATE store_inventories
-SET 
-    available_quantity = available_quantity + $3,
-    reserved_quantity = reserved_quantity - $3,
-    version = version + 1,
-    updated_at = NOW()
-WHERE 
-    store_id = $1 
-    AND product_id = $2 
-    AND reserved_quantity >= $3
-RETURNING store_id, product_id, available_quantity, reserved_quantity, version, updated_at
-`
-
-type RestoreInventoryAtomicParams struct {
-	StoreID   uuid.UUID `json:"store_id"`
-	ProductID uuid.UUID `json:"product_id"`
-	Quantity  int32     `json:"quantity"`
-}
-
-type RestoreInventoryAtomicRow struct {
-	StoreID           uuid.UUID `json:"store_id"`
-	ProductID         uuid.UUID `json:"product_id"`
-	AvailableQuantity int32     `json:"available_quantity"`
-	ReservedQuantity  int32     `json:"reserved_quantity"`
-	Version           int32     `json:"version"`
-	UpdatedAt         time.Time `json:"updated_at"`
-}
-
-func (q *Queries) RestoreInventoryAtomic(ctx context.Context, arg RestoreInventoryAtomicParams) (RestoreInventoryAtomicRow, error) {
-	row := q.db.QueryRow(ctx, restoreInventoryAtomic, arg.StoreID, arg.ProductID, arg.Quantity)
-	var i RestoreInventoryAtomicRow
-	err := row.Scan(
-		&i.StoreID,
-		&i.ProductID,
-		&i.AvailableQuantity,
-		&i.ReservedQuantity,
-		&i.Version,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const deductReservedInventoryAtomic = `-- name: DeductReservedInventoryAtomic :one
 UPDATE store_inventories
 SET 
@@ -254,22 +106,23 @@ RETURNING store_id, product_id, available_quantity, reserved_quantity, version, 
 `
 
 type DeductReservedInventoryAtomicParams struct {
-	StoreID   uuid.UUID `json:"store_id"`
-	ProductID uuid.UUID `json:"product_id"`
-	Quantity  int32     `json:"quantity"`
+	StoreID          pgtype.UUID `json:"store_id"`
+	ProductID        pgtype.UUID `json:"product_id"`
+	ReservedQuantity int32       `json:"reserved_quantity"`
 }
 
 type DeductReservedInventoryAtomicRow struct {
-	StoreID           uuid.UUID `json:"store_id"`
-	ProductID         uuid.UUID `json:"product_id"`
-	AvailableQuantity int32     `json:"available_quantity"`
-	ReservedQuantity  int32     `json:"reserved_quantity"`
-	Version           int32     `json:"version"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	StoreID           pgtype.UUID        `json:"store_id"`
+	ProductID         pgtype.UUID        `json:"product_id"`
+	AvailableQuantity int32              `json:"available_quantity"`
+	ReservedQuantity  int32              `json:"reserved_quantity"`
+	Version           int32              `json:"version"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
+// Finalizes stock consumption upon order fulfillment
 func (q *Queries) DeductReservedInventoryAtomic(ctx context.Context, arg DeductReservedInventoryAtomicParams) (DeductReservedInventoryAtomicRow, error) {
-	row := q.db.QueryRow(ctx, deductReservedInventoryAtomic, arg.StoreID, arg.ProductID, arg.Quantity)
+	row := q.db.QueryRow(ctx, deductReservedInventoryAtomic, arg.StoreID, arg.ProductID, arg.ReservedQuantity)
 	var i DeductReservedInventoryAtomicRow
 	err := row.Scan(
 		&i.StoreID,
@@ -277,6 +130,71 @@ func (q *Queries) DeductReservedInventoryAtomic(ctx context.Context, arg DeductR
 		&i.AvailableQuantity,
 		&i.ReservedQuantity,
 		&i.Version,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getStoreInventory = `-- name: GetStoreInventory :one
+
+SELECT store_id, product_id, available_quantity, reserved_quantity, version, created_at, updated_at
+FROM store_inventories
+WHERE store_id = $1 AND product_id = $2
+`
+
+type GetStoreInventoryParams struct {
+	StoreID   pgtype.UUID `json:"store_id"`
+	ProductID pgtype.UUID `json:"product_id"`
+}
+
+// Core Inventory and Reservation Queries (Zero-Overselling Engine)
+func (q *Queries) GetStoreInventory(ctx context.Context, arg GetStoreInventoryParams) (StoreInventory, error) {
+	row := q.db.QueryRow(ctx, getStoreInventory, arg.StoreID, arg.ProductID)
+	var i StoreInventory
+	err := row.Scan(
+		&i.StoreID,
+		&i.ProductID,
+		&i.AvailableQuantity,
+		&i.ReservedQuantity,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markReservationExpired = `-- name: MarkReservationExpired :one
+UPDATE inventory_reservations
+SET 
+    status = 'EXPIRED',
+    updated_at = NOW()
+WHERE 
+    id = $1 
+    AND status = 'RESERVED'
+RETURNING id, order_id, store_id, product_id, quantity, status, updated_at
+`
+
+type MarkReservationExpiredRow struct {
+	ID        pgtype.UUID        `json:"id"`
+	OrderID   pgtype.UUID        `json:"order_id"`
+	StoreID   pgtype.UUID        `json:"store_id"`
+	ProductID pgtype.UUID        `json:"product_id"`
+	Quantity  int32              `json:"quantity"`
+	Status    string             `json:"status"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Transition from RESERVED -> EXPIRED guarded by status check
+func (q *Queries) MarkReservationExpired(ctx context.Context, id pgtype.UUID) (MarkReservationExpiredRow, error) {
+	row := q.db.QueryRow(ctx, markReservationExpired, id)
+	var i MarkReservationExpiredRow
+	err := row.Scan(
+		&i.ID,
+		&i.OrderID,
+		&i.StoreID,
+		&i.ProductID,
+		&i.Quantity,
+		&i.Status,
 		&i.UpdatedAt,
 	)
 	return i, err
@@ -294,22 +212,22 @@ FOR UPDATE SKIP LOCKED
 `
 
 type PickExpiredReservationsForUpdateRow struct {
-	ID        uuid.UUID `json:"id"`
-	OrderID   uuid.UUID `json:"order_id"`
-	StoreID   uuid.UUID `json:"store_id"`
-	ProductID uuid.UUID `json:"product_id"`
-	Quantity  int32     `json:"quantity"`
-	Status    string    `json:"status"`
-	ExpiresAt time.Time `json:"expires_at"`
+	ID        pgtype.UUID        `json:"id"`
+	OrderID   pgtype.UUID        `json:"order_id"`
+	StoreID   pgtype.UUID        `json:"store_id"`
+	ProductID pgtype.UUID        `json:"product_id"`
+	Quantity  int32              `json:"quantity"`
+	Status    string             `json:"status"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
 }
 
+// Expiry worker claims up to $1 expired reservations safely using FOR UPDATE SKIP LOCKED
 func (q *Queries) PickExpiredReservationsForUpdate(ctx context.Context, limit int32) ([]PickExpiredReservationsForUpdateRow, error) {
 	rows, err := q.db.Query(ctx, pickExpiredReservationsForUpdate, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
 	var items []PickExpiredReservationsForUpdateRow
 	for rows.Next() {
 		var i PickExpiredReservationsForUpdateRow
@@ -332,10 +250,10 @@ func (q *Queries) PickExpiredReservationsForUpdate(ctx context.Context, limit in
 	return items, nil
 }
 
-const markReservationExpired = `-- name: MarkReservationExpired :one
+const releaseReservation = `-- name: ReleaseReservation :one
 UPDATE inventory_reservations
 SET 
-    status = 'EXPIRED',
+    status = 'RELEASED',
     updated_at = NOW()
 WHERE 
     id = $1 
@@ -343,19 +261,20 @@ WHERE
 RETURNING id, order_id, store_id, product_id, quantity, status, updated_at
 `
 
-type MarkReservationExpiredRow struct {
-	ID        uuid.UUID `json:"id"`
-	OrderID   uuid.UUID `json:"order_id"`
-	StoreID   uuid.UUID `json:"store_id"`
-	ProductID uuid.UUID `json:"product_id"`
-	Quantity  int32     `json:"quantity"`
-	Status    string    `json:"status"`
-	UpdatedAt time.Time `json:"updated_at"`
+type ReleaseReservationRow struct {
+	ID        pgtype.UUID        `json:"id"`
+	OrderID   pgtype.UUID        `json:"order_id"`
+	StoreID   pgtype.UUID        `json:"store_id"`
+	ProductID pgtype.UUID        `json:"product_id"`
+	Quantity  int32              `json:"quantity"`
+	Status    string             `json:"status"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
-func (q *Queries) MarkReservationExpired(ctx context.Context, id uuid.UUID) (MarkReservationExpiredRow, error) {
-	row := q.db.QueryRow(ctx, markReservationExpired, id)
-	var i MarkReservationExpiredRow
+// Transition from RESERVED -> RELEASED guarded by status check
+func (q *Queries) ReleaseReservation(ctx context.Context, id pgtype.UUID) (ReleaseReservationRow, error) {
+	row := q.db.QueryRow(ctx, releaseReservation, id)
+	var i ReleaseReservationRow
 	err := row.Scan(
 		&i.ID,
 		&i.OrderID,
@@ -363,6 +282,95 @@ func (q *Queries) MarkReservationExpired(ctx context.Context, id uuid.UUID) (Mar
 		&i.ProductID,
 		&i.Quantity,
 		&i.Status,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const reserveInventoryAtomic = `-- name: ReserveInventoryAtomic :one
+UPDATE store_inventories
+SET 
+    available_quantity = available_quantity - $3,
+    reserved_quantity = reserved_quantity + $3,
+    version = version + 1,
+    updated_at = NOW()
+WHERE 
+    store_id = $1 
+    AND product_id = $2 
+    AND available_quantity >= $3
+RETURNING store_id, product_id, available_quantity, reserved_quantity, version, updated_at
+`
+
+type ReserveInventoryAtomicParams struct {
+	StoreID           pgtype.UUID `json:"store_id"`
+	ProductID         pgtype.UUID `json:"product_id"`
+	AvailableQuantity int32       `json:"available_quantity"`
+}
+
+type ReserveInventoryAtomicRow struct {
+	StoreID           pgtype.UUID        `json:"store_id"`
+	ProductID         pgtype.UUID        `json:"product_id"`
+	AvailableQuantity int32              `json:"available_quantity"`
+	ReservedQuantity  int32              `json:"reserved_quantity"`
+	Version           int32              `json:"version"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Atomically decrements available_quantity and increments reserved_quantity.
+// Condition available_quantity >= $3 prevents overselling at database tuple level.
+func (q *Queries) ReserveInventoryAtomic(ctx context.Context, arg ReserveInventoryAtomicParams) (ReserveInventoryAtomicRow, error) {
+	row := q.db.QueryRow(ctx, reserveInventoryAtomic, arg.StoreID, arg.ProductID, arg.AvailableQuantity)
+	var i ReserveInventoryAtomicRow
+	err := row.Scan(
+		&i.StoreID,
+		&i.ProductID,
+		&i.AvailableQuantity,
+		&i.ReservedQuantity,
+		&i.Version,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const restoreInventoryAtomic = `-- name: RestoreInventoryAtomic :one
+UPDATE store_inventories
+SET 
+    available_quantity = available_quantity + $3,
+    reserved_quantity = reserved_quantity - $3,
+    version = version + 1,
+    updated_at = NOW()
+WHERE 
+    store_id = $1 
+    AND product_id = $2 
+    AND reserved_quantity >= $3
+RETURNING store_id, product_id, available_quantity, reserved_quantity, version, updated_at
+`
+
+type RestoreInventoryAtomicParams struct {
+	StoreID           pgtype.UUID `json:"store_id"`
+	ProductID         pgtype.UUID `json:"product_id"`
+	AvailableQuantity int32       `json:"available_quantity"`
+}
+
+type RestoreInventoryAtomicRow struct {
+	StoreID           pgtype.UUID        `json:"store_id"`
+	ProductID         pgtype.UUID        `json:"product_id"`
+	AvailableQuantity int32              `json:"available_quantity"`
+	ReservedQuantity  int32              `json:"reserved_quantity"`
+	Version           int32              `json:"version"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Releases reservation back to available stock
+func (q *Queries) RestoreInventoryAtomic(ctx context.Context, arg RestoreInventoryAtomicParams) (RestoreInventoryAtomicRow, error) {
+	row := q.db.QueryRow(ctx, restoreInventoryAtomic, arg.StoreID, arg.ProductID, arg.AvailableQuantity)
+	var i RestoreInventoryAtomicRow
+	err := row.Scan(
+		&i.StoreID,
+		&i.ProductID,
+		&i.AvailableQuantity,
+		&i.ReservedQuantity,
+		&i.Version,
 		&i.UpdatedAt,
 	)
 	return i, err

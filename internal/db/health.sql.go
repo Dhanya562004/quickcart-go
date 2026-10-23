@@ -10,9 +10,11 @@ import (
 )
 
 const checkDatabaseHealth = `-- name: CheckDatabaseHealth :one
+
 SELECT 1 as healthy
 `
 
+// Health and Diagnostics Queries
 func (q *Queries) CheckDatabaseHealth(ctx context.Context) (int32, error) {
 	row := q.db.QueryRow(ctx, checkDatabaseHealth)
 	var healthy int32

@@ -5,164 +5,162 @@
 package db
 
 import (
-	"time"
-
-	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type User struct {
-	ID           uuid.UUID `json:"id"`
-	Email        string    `json:"email"`
-	PasswordHash string    `json:"password_hash"`
-	FullName     string    `json:"full_name"`
-	Phone        string    `json:"phone"`
-	Role         string    `json:"role"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
-}
-
-type DarkStore struct {
-	ID              uuid.UUID `json:"id"`
-	StoreCode       string    `json:"store_code"`
-	Name            string    `json:"name"`
-	Address         string    `json:"address"`
-	Latitude        float64   `json:"latitude"`
-	Longitude       float64   `json:"longitude"`
-	IsActive        bool      `json:"is_active"`
-	MaxActiveOrders int32     `json:"max_active_orders"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
-}
-
-type Category struct {
-	ID          uuid.UUID `json:"id"`
-	Name        string    `json:"name"`
-	Slug        string    `json:"slug"`
-	Description *string   `json:"description"`
-	CreatedAt   time.Time `json:"created_at"`
-}
-
-type Product struct {
-	ID          uuid.UUID `json:"id"`
-	CategoryID  uuid.UUID `json:"category_id"`
-	Sku         string    `json:"sku"`
-	Name        string    `json:"name"`
-	Description *string   `json:"description"`
-	Unit        string    `json:"unit"`
-	PricePaise  int64     `json:"price_paise"`
-	IsActive    bool      `json:"is_active"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-}
-
-type StoreInventory struct {
-	StoreID           uuid.UUID `json:"store_id"`
-	ProductID         uuid.UUID `json:"product_id"`
-	AvailableQuantity int32     `json:"available_quantity"`
-	ReservedQuantity  int32     `json:"reserved_quantity"`
-	Version           int32     `json:"version"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
-}
-
-type Order struct {
-	ID                 uuid.UUID `json:"id"`
-	OrderNumber        string    `json:"order_number"`
-	UserID             uuid.UUID `json:"user_id"`
-	StoreID            uuid.UUID `json:"store_id"`
-	Status             string    `json:"status"`
-	TotalAmountPaise   int64     `json:"total_amount_paise"`
-	DeliveryAddress    string    `json:"delivery_address"`
-	IdempotencyKey     *string   `json:"idempotency_key"`
-	CancellationReason *string   `json:"cancellation_reason"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
-}
-
-type InventoryReservation struct {
-	ID        uuid.UUID `json:"id"`
-	OrderID   uuid.UUID `json:"order_id"`
-	StoreID   uuid.UUID `json:"store_id"`
-	ProductID uuid.UUID `json:"product_id"`
-	Quantity  int32     `json:"quantity"`
-	Status    string    `json:"status"`
-	ExpiresAt time.Time `json:"expires_at"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-type OrderItem struct {
-	ID              uuid.UUID `json:"id"`
-	OrderID         uuid.UUID `json:"order_id"`
-	ProductID       uuid.UUID `json:"product_id"`
-	Quantity        int32     `json:"quantity"`
-	UnitPricePaise  int64     `json:"unit_price_paise"`
-	TotalPricePaise int64     `json:"total_price_paise"`
-	CreatedAt       time.Time `json:"created_at"`
-}
-
-type OrderStatusHistory struct {
-	ID         uuid.UUID  `json:"id"`
-	OrderID    uuid.UUID  `json:"order_id"`
-	FromStatus *string    `json:"from_status"`
-	ToStatus   string     `json:"to_status"`
-	ActorType  string     `json:"actor_type"`
-	ActorID    *uuid.UUID `json:"actor_id"`
-	Notes      *string    `json:"notes"`
-	CreatedAt  time.Time  `json:"created_at"`
-}
-
-type Payment struct {
-	ID                   uuid.UUID `json:"id"`
-	OrderID              uuid.UUID `json:"order_id"`
-	Attempt              int32     `json:"attempt"`
-	IdempotencyKey       string    `json:"idempotency_key"`
-	AmountPaise          int64     `json:"amount_paise"`
-	Currency             string    `json:"currency"`
-	Status               string    `json:"status"`
-	PaymentMethod        string    `json:"payment_method"`
-	TransactionReference *string   `json:"transaction_reference"`
-	FailureReason        *string   `json:"failure_reason"`
-	CreatedAt            time.Time `json:"created_at"`
-	UpdatedAt            time.Time `json:"updated_at"`
-}
-
-type Refund struct {
-	ID          uuid.UUID `json:"id"`
-	PaymentID   uuid.UUID `json:"payment_id"`
-	AmountPaise int64     `json:"amount_paise"`
-	Reason      string    `json:"reason"`
-	Status      string    `json:"status"`
-	CreatedAt   time.Time `json:"created_at"`
-}
-
 type Cart struct {
-	ID        uuid.UUID  `json:"id"`
-	UserID    uuid.UUID  `json:"user_id"`
-	StoreID   *uuid.UUID `json:"store_id"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	ID        pgtype.UUID        `json:"id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	StoreID   pgtype.UUID        `json:"store_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 type CartItem struct {
-	ID        uuid.UUID `json:"id"`
-	CartID    uuid.UUID `json:"cart_id"`
-	ProductID uuid.UUID `json:"product_id"`
-	Quantity  int32     `json:"quantity"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        pgtype.UUID        `json:"id"`
+	CartID    pgtype.UUID        `json:"cart_id"`
+	ProductID pgtype.UUID        `json:"product_id"`
+	Quantity  int32              `json:"quantity"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Category struct {
+	ID          pgtype.UUID        `json:"id"`
+	Name        string             `json:"name"`
+	Slug        string             `json:"slug"`
+	Description pgtype.Text        `json:"description"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type DarkStore struct {
+	ID              pgtype.UUID        `json:"id"`
+	StoreCode       string             `json:"store_code"`
+	Name            string             `json:"name"`
+	Address         string             `json:"address"`
+	Latitude        pgtype.Numeric     `json:"latitude"`
+	Longitude       pgtype.Numeric     `json:"longitude"`
+	IsActive        bool               `json:"is_active"`
+	MaxActiveOrders int32              `json:"max_active_orders"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
 type IdempotencyKey struct {
-	ID           uuid.UUID `json:"id"`
-	Key          string    `json:"key"`
-	UserID       uuid.UUID `json:"user_id"`
-	RequestPath  string    `json:"request_path"`
-	RequestHash  string    `json:"request_hash"`
-	ResponseCode *int32    `json:"response_code"`
-	ResponseBody []byte    `json:"response_body"`
-	Status       string    `json:"status"`
-	LockedUntil  time.Time `json:"locked_until"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID           pgtype.UUID        `json:"id"`
+	Key          string             `json:"key"`
+	UserID       pgtype.UUID        `json:"user_id"`
+	RequestPath  string             `json:"request_path"`
+	RequestHash  string             `json:"request_hash"`
+	ResponseCode pgtype.Int4        `json:"response_code"`
+	ResponseBody []byte             `json:"response_body"`
+	Status       string             `json:"status"`
+	LockedUntil  pgtype.Timestamptz `json:"locked_until"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+type InventoryReservation struct {
+	ID        pgtype.UUID        `json:"id"`
+	OrderID   pgtype.UUID        `json:"order_id"`
+	StoreID   pgtype.UUID        `json:"store_id"`
+	ProductID pgtype.UUID        `json:"product_id"`
+	Quantity  int32              `json:"quantity"`
+	Status    string             `json:"status"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Order struct {
+	ID                 pgtype.UUID        `json:"id"`
+	OrderNumber        string             `json:"order_number"`
+	UserID             pgtype.UUID        `json:"user_id"`
+	StoreID            pgtype.UUID        `json:"store_id"`
+	Status             string             `json:"status"`
+	TotalAmountPaise   int64              `json:"total_amount_paise"`
+	DeliveryAddress    string             `json:"delivery_address"`
+	IdempotencyKey     pgtype.Text        `json:"idempotency_key"`
+	CancellationReason pgtype.Text        `json:"cancellation_reason"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type OrderItem struct {
+	ID              pgtype.UUID        `json:"id"`
+	OrderID         pgtype.UUID        `json:"order_id"`
+	ProductID       pgtype.UUID        `json:"product_id"`
+	Quantity        int32              `json:"quantity"`
+	UnitPricePaise  int64              `json:"unit_price_paise"`
+	TotalPricePaise int64              `json:"total_price_paise"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type OrderStatusHistory struct {
+	ID         pgtype.UUID        `json:"id"`
+	OrderID    pgtype.UUID        `json:"order_id"`
+	FromStatus pgtype.Text        `json:"from_status"`
+	ToStatus   string             `json:"to_status"`
+	ActorType  string             `json:"actor_type"`
+	ActorID    pgtype.UUID        `json:"actor_id"`
+	Notes      pgtype.Text        `json:"notes"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type Payment struct {
+	ID                   pgtype.UUID        `json:"id"`
+	OrderID              pgtype.UUID        `json:"order_id"`
+	Attempt              int32              `json:"attempt"`
+	IdempotencyKey       string             `json:"idempotency_key"`
+	AmountPaise          int64              `json:"amount_paise"`
+	Currency             string             `json:"currency"`
+	Status               string             `json:"status"`
+	PaymentMethod        string             `json:"payment_method"`
+	TransactionReference pgtype.Text        `json:"transaction_reference"`
+	FailureReason        pgtype.Text        `json:"failure_reason"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Product struct {
+	ID          pgtype.UUID        `json:"id"`
+	CategoryID  pgtype.UUID        `json:"category_id"`
+	Sku         string             `json:"sku"`
+	Name        string             `json:"name"`
+	Description pgtype.Text        `json:"description"`
+	Unit        string             `json:"unit"`
+	PricePaise  int64              `json:"price_paise"`
+	IsActive    bool               `json:"is_active"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Refund struct {
+	ID          pgtype.UUID        `json:"id"`
+	PaymentID   pgtype.UUID        `json:"payment_id"`
+	AmountPaise int64              `json:"amount_paise"`
+	Reason      string             `json:"reason"`
+	Status      string             `json:"status"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type StoreInventory struct {
+	StoreID           pgtype.UUID        `json:"store_id"`
+	ProductID         pgtype.UUID        `json:"product_id"`
+	AvailableQuantity int32              `json:"available_quantity"`
+	ReservedQuantity  int32              `json:"reserved_quantity"`
+	Version           int32              `json:"version"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+type User struct {
+	ID           pgtype.UUID        `json:"id"`
+	Email        string             `json:"email"`
+	PasswordHash string             `json:"password_hash"`
+	FullName     string             `json:"full_name"`
+	Phone        string             `json:"phone"`
+	Role         string             `json:"role"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
