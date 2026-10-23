@@ -21,9 +21,11 @@ func TestConfig_Defaults(t *testing.T) {
 	assert.Equal(t, "0.0.0.0", cfg.ServerHost)
 	assert.Equal(t, EnvDevelopment, cfg.Environment)
 	assert.Equal(t, "info", cfg.LogLevel)
-	assert.Equal(t, 5*time.Second, cfg.ShutdownTimeout)
+	assert.Equal(t, 10*time.Second, cfg.ShutdownTimeout)
 	assert.Equal(t, int32(25), cfg.DBMaxConns)
 	assert.Equal(t, int32(5), cfg.DBMinConns)
+	assert.Equal(t, 4, cfg.WorkerPoolSize)
+	assert.Equal(t, 5*time.Second, cfg.WorkerDrainTimeout)
 	assert.Equal(t, "0.0.0.0:8080", cfg.Address())
 }
 
@@ -82,6 +84,20 @@ func TestConfig_Validation(t *testing.T) {
 				c.DBMaxConns = 10
 			},
 			expectedErr: "DB_MIN_CONNS (30) cannot exceed DB_MAX_CONNS (10)",
+		},
+		{
+			name: "WorkerPoolSize zero",
+			modify: func(c *Config) {
+				c.WorkerPoolSize = 0
+			},
+			expectedErr: "WORKER_POOL_SIZE must be greater than 0",
+		},
+		{
+			name: "WorkerDrainTimeout zero",
+			modify: func(c *Config) {
+				c.WorkerDrainTimeout = 0
+			},
+			expectedErr: "WORKER_DRAIN_TIMEOUT must be greater than 0",
 		},
 	}
 

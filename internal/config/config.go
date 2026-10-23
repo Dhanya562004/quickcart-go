@@ -38,6 +38,10 @@ type Config struct {
 
 	// Redis configuration
 	RedisURL string `json:"redis_url"`
+
+	// Concurrency Worker Pool
+	WorkerPoolSize     int           `json:"worker_pool_size"`
+	WorkerDrainTimeout time.Duration `json:"worker_drain_timeout"`
 }
 
 // Load loads application configuration from environment variables with safe defaults.
@@ -47,7 +51,7 @@ func Load() (*Config, error) {
 		ServerHost:         getEnv("SERVER_HOST", "0.0.0.0"),
 		Environment:        Environment(getEnv("APP_ENV", string(EnvDevelopment))),
 		LogLevel:           strings.ToLower(getEnv("LOG_LEVEL", "info")),
-		ShutdownTimeout:    getEnvDuration("SHUTDOWN_TIMEOUT", 5*time.Second),
+		ShutdownTimeout:    getEnvDuration("SHUTDOWN_TIMEOUT", 10*time.Second),
 		DatabaseURL:        getEnv("DATABASE_URL", "postgres://quickcart:quickcart@localhost:5432/quickcart?sslmode=disable"),
 		DBMaxConns:         int32(getEnvInt("DB_MAX_CONNS", 25)),
 		DBMinConns:         int32(getEnvInt("DB_MIN_CONNS", 5)),
@@ -55,6 +59,8 @@ func Load() (*Config, error) {
 		DBMaxConnIdleTime:  getEnvDuration("DB_MAX_CONN_IDLE_TIME", 30*time.Minute),
 		DBHealthCheckDelay: getEnvDuration("DB_HEALTH_CHECK_DELAY", 1*time.Minute),
 		RedisURL:           getEnv("REDIS_URL", "redis://localhost:6379/0"),
+		WorkerPoolSize:     getEnvInt("WORKER_POOL_SIZE", 4),
+		WorkerDrainTimeout: getEnvDuration("WORKER_DRAIN_TIMEOUT", 5*time.Second),
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -103,6 +109,14 @@ func (c *Config) Validate() error {
 
 	if c.DBMinConns > c.DBMaxConns {
 		return fmt.Errorf("DB_MIN_CONNS (%d) cannot exceed DB_MAX_CONNS (%d)", c.DBMinConns, c.DBMaxConns)
+	}
+
+	if c.WorkerPoolSize <= 0 {
+		return errors.New("WORKER_POOL_SIZE must be greater than 0")
+	}
+
+	if c.WorkerDrainTimeout <= 0 {
+		return errors.New("WORKER_DRAIN_TIMEOUT must be greater than 0")
 	}
 
 	return nil
