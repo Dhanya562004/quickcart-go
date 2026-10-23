@@ -16,8 +16,11 @@ func NewHandler(svc Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
+func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, middlewares ...gin.HandlerFunc) {
 	cart := rg.Group("/cart")
+	for _, m := range middlewares {
+		cart.Use(m)
+	}
 	{
 		cart.GET("", h.GetCart)
 		cart.POST("/items", h.AddItem)
@@ -28,21 +31,18 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 }
 
 func getUserID(c *gin.Context) (uuid.UUID, error) {
-	header := c.GetHeader("X-User-ID")
-	if header == "" {
-		return uuid.Nil, errors.New("missing X-User-ID header")
+	if val, exists := c.Get("auth_user_id"); exists {
+		if u, ok := val.(uuid.UUID); ok && u != uuid.Nil {
+			return u, nil
+		}
 	}
-	u, err := uuid.Parse(header)
-	if err != nil {
-		return uuid.Nil, errors.New("invalid X-User-ID header UUID format")
-	}
-	return u, nil
+	return uuid.Nil, errors.New("unauthorized; authentication required")
 }
 
 func (h *Handler) GetCart(c *gin.Context) {
 	userID, err := getUserID(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -57,7 +57,7 @@ func (h *Handler) GetCart(c *gin.Context) {
 func (h *Handler) AddItem(c *gin.Context) {
 	userID, err := getUserID(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -86,7 +86,7 @@ func (h *Handler) AddItem(c *gin.Context) {
 func (h *Handler) UpdateQuantity(c *gin.Context) {
 	userID, err := getUserID(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -113,7 +113,7 @@ func (h *Handler) UpdateQuantity(c *gin.Context) {
 func (h *Handler) RemoveItem(c *gin.Context) {
 	userID, err := getUserID(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -134,7 +134,7 @@ func (h *Handler) RemoveItem(c *gin.Context) {
 func (h *Handler) ClearCart(c *gin.Context) {
 	userID, err := getUserID(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -144,3 +144,4 @@ func (h *Handler) ClearCart(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "cart cleared successfully"})
 }
+

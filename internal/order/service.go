@@ -25,6 +25,8 @@ type Service interface {
 	CancelOrder(ctx context.Context, userID, orderID uuid.UUID, req CancelOrderRequest) (*Order, error)
 	GetOrder(ctx context.Context, userID, orderID uuid.UUID) (*Order, error)
 	ListOrders(ctx context.Context, userID uuid.UUID, limit, offset int32) ([]Order, error)
+	GetOrderByAdmin(ctx context.Context, orderID uuid.UUID) (*Order, error)
+	CancelOrderByAdmin(ctx context.Context, orderID uuid.UUID, req CancelOrderRequest) (*Order, error)
 }
 
 type service struct {
@@ -163,4 +165,24 @@ func (s *service) ListOrders(ctx context.Context, userID uuid.UUID, limit, offse
 		offset = 0
 	}
 	return s.repo.ListOrdersByUserID(ctx, userID, limit, offset)
+}
+
+func (s *service) GetOrderByAdmin(ctx context.Context, orderID uuid.UUID) (*Order, error) {
+	return s.repo.GetOrderByID(ctx, orderID)
+}
+
+func (s *service) CancelOrderByAdmin(ctx context.Context, orderID uuid.UUID, req CancelOrderRequest) (*Order, error) {
+	ord, err := s.repo.GetOrderByID(ctx, orderID)
+	if err != nil {
+		return nil, err
+	}
+
+	if !CanCancel(ord.Status) {
+		if ord.Status == StatusCancelled {
+			return nil, ErrOrderAlreadyCancelled
+		}
+		return nil, ErrOrderCannotBeCancelled
+	}
+
+	return s.repo.CancelOrderTx(ctx, orderID, req.Reason, nil)
 }
