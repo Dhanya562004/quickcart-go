@@ -14,6 +14,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ../migrations/000001_init_schema.up.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+      - ../migrations/000002_auth_refresh_tokens.up.sql:/docker-entrypoint-initdb.d/02_auth.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U quickcart -d quickcart"]
       interval: 5s
@@ -55,11 +56,48 @@ services:
       REDIS_URL: "redis://quickcart-redis:6379/0"
       DB_MAX_CONNS: "25"
       DB_MIN_CONNS: "5"
+      JWT_SECRET: "quickcart-dev-jwt-super-secret-key-32bytes-min"
+      METRICS_TOKEN: "quickcart-metrics-scrape-token"
     depends_on:
       quickcart-db:
         condition: service_healthy
       quickcart-redis:
         condition: service_healthy
+    networks:
+      - quickcart-net
+
+  quickcart-prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: quickcart-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+    depends_on:
+      - quickcart-api
+    networks:
+      - quickcart-net
+
+  quickcart-grafana:
+    image: grafana/grafana:10.4.0
+    container_name: quickcart-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - quickcart-prometheus
     networks:
       - quickcart-net
 

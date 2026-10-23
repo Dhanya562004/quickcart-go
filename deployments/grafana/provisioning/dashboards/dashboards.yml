@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: 'QuickCart Dashboards'
+    orgId: 1
+    folder: 'QuickCart'
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/json
