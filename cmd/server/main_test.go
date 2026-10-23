@@ -128,3 +128,54 @@ func TestSetupRouter_RateLimiting_FailOpen_WhenRedisNil(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 	}
 }
+
+func TestSetupRouter_DocsAndOpenAPI(t *testing.T) {
+	cfg := &config.Config{
+		Environment: config.EnvDevelopment,
+		LogLevel:    "info",
+		ServerPort:  "8080",
+	}
+
+	router := SetupRouter(cfg, getTestLogger(), nil, nil, nil, nil)
+
+	// 1. Swagger UI at /docs
+	wDocs := httptest.NewRecorder()
+	reqDocs, _ := http.NewRequest(http.MethodGet, "/docs", nil)
+	router.ServeHTTP(wDocs, reqDocs)
+	assert.Equal(t, http.StatusOK, wDocs.Code)
+	assert.Contains(t, wDocs.Body.String(), "SwaggerUIBundle")
+
+	// 2. Raw OpenAPI specification at /api/openapi.yaml
+	wSpec := httptest.NewRecorder()
+	reqSpec, _ := http.NewRequest(http.MethodGet, "/api/openapi.yaml", nil)
+	router.ServeHTTP(wSpec, reqSpec)
+	assert.Equal(t, http.StatusOK, wSpec.Code)
+	assert.Contains(t, wSpec.Body.String(), "openapi: 3.0.3")
+}
+
+func TestSetupRouter_MetricsProtection(t *testing.T) {
+	scrapeToken := "secret-metrics-scrape-token"
+	cfgProd := &config.Config{
+		Environment:  config.EnvProduction,
+		LogLevel:     "info",
+		ServerPort:   "8080",
+		MetricsToken: scrapeToken,
+	}
+
+	routerProd := SetupRouter(cfgProd, getTestLogger(), nil, nil, nil, nil)
+
+	// Unauthenticated request in production must be rejected
+	wUnauth := httptest.NewRecorder()
+	reqUnauth, _ := http.NewRequest(http.MethodGet, "/metrics", nil)
+	routerProd.ServeHTTP(wUnauth, reqUnauth)
+	assert.Equal(t, http.StatusUnauthorized, wUnauth.Code)
+
+	// Authenticated request with Bearer scrape token must succeed
+	wAuth := httptest.NewRecorder()
+	reqAuth, _ := http.NewRequest(http.MethodGet, "/metrics", nil)
+	reqAuth.Header.Set("Authorization", "Bearer "+scrapeToken)
+	routerProd.ServeHTTP(wAuth, reqAuth)
+	assert.Equal(t, http.StatusOK, wAuth.Code)
+	assert.Contains(t, wAuth.Body.String(), "quickcart_http_requests_total")
+}
+

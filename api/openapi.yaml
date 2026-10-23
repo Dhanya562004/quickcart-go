@@ -1,0 +1,1126 @@
+openapi: 3.0.3
+info:
+  title: QuickCart Concurrent Quick-Commerce Engine API
+  description: |
+    Production-grade, high-throughput concurrent quick-commerce order and inventory engine built in Go 1.25.
+    Features sub-10-minute delivery SLAs, atomic inventory allocation, cache-aside Redis caching, sliding-window rate limiting,
+    atomic JWT refresh-token rotation, server-sent events (SSE) order tracking, and idempotent payment processing.
+  version: 1.0.0
+  contact:
+    name: QuickCart Engineering Team
+    url: https://github.com/Dhanya562004/quickcart-go
+
+servers:
+  - url: http://localhost:8080
+    description: Local Development Server
+  - url: https://api.quickcart.internal
+    description: Production Cluster Gateway
+
+paths:
+  /healthz:
+    get:
+      summary: Liveness probe
+      description: Returns 200 OK if the application process is running and accepting traffic.
+      responses:
+        '200':
+          description: Process healthy
+          content:
+            application/json:
+              example:
+                status: "alive"
+                timestamp: "2026-10-23T18:00:00Z"
+
+  /readyz:
+    get:
+      summary: Readiness probe
+      description: Returns 200 OK only if critical dependencies (PostgreSQL and Redis) are connected and responsive.
+      responses:
+        '200':
+          description: Dependencies healthy
+          content:
+            application/json:
+              example:
+                status: "ready"
+                database: "connected"
+                redis: "connected"
+                timestamp: "2026-10-23T18:00:00Z"
+        '503':
+          description: Service unready
+          content:
+            application/json:
+              example:
+                status: "not_ready"
+                database: "disconnected"
+                error: "connection refused"
+                timestamp: "2026-10-23T18:00:00Z"
+
+  /metrics:
+    get:
+      summary: Prometheus metrics scrape endpoint
+      description: Returns standard Prometheus metrics with strictly bounded labels. Protected by Bearer token in production.
+      security:
+        - MetricsAuth: []
+      responses:
+        '200':
+          description: Prometheus exposition format text
+          content:
+            text/plain:
+              example: "# HELP quickcart_http_requests_total Total number of HTTP requests processed.\nquickcart_http_requests_total{method=\"GET\",route=\"/healthz\",status=\"200\"} 42"
+        '401':
+          description: Unauthorized metrics scraping
+
+  /docs:
+    get:
+      summary: Swagger UI Documentation
+      description: Interactive API browser and tester powered by Swagger UI.
+      responses:
+        '200':
+          description: HTML document rendering Swagger UI
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /api/v1/system/info:
+    get:
+      summary: System service information
+      tags:
+        - System
+      responses:
+        '200':
+          description: Service build and environment metadata
+          content:
+            application/json:
+              example:
+                service: "QuickCart Concurrent Engine"
+                version: "1.0.0-phase5"
+                environment: "production"
+                timestamp: "2026-10-23T18:00:00Z"
+
+  /api/v1/auth/register:
+    post:
+      summary: Register a new customer
+      description: Securely creates a customer account using bcrypt (cost 12). Cannot assign administrative roles.
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          description: Validation error or weak password
+        '409':
+          description: Email already registered
+
+  /api/v1/auth/login:
+    post:
+      summary: Authenticate user credentials
+      description: Verifies password hash and generates an access JWT (15m TTL) and secure refresh token (7d TTL).
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authentication successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: Invalid email or password
+
+  /api/v1/auth/refresh:
+    post:
+      summary: Atomic refresh token rotation
+      description: Exchanges an active refresh token for a new token pair. Implements atomic single-use rotation to prevent replay attacks.
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: Tokens rotated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPair'
+        '401':
+          description: Invalid, expired, or already-rotated refresh token
+
+  /api/v1/auth/logout:
+    post:
+      summary: Revoke refresh token
+      description: Immediately revokes the supplied refresh token in PostgreSQL.
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: Logged out successfully
+
+  /api/v1/auth/me:
+    get:
+      summary: Get current authenticated user profile
+      tags:
+        - Authentication
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Authenticated user details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          description: Missing, invalid, or expired access token
+
+  /api/v1/categories:
+    get:
+      summary: List all catalog categories
+      tags:
+        - Catalog
+      responses:
+        '200':
+          description: List of product categories
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Category'
+
+  /api/v1/categories/{id}:
+    get:
+      summary: Get category by ID
+      tags:
+        - Catalog
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Category details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+        '404':
+          description: Category not found
+
+  /api/v1/stores:
+    get:
+      summary: List active dark stores
+      tags:
+        - Catalog
+      responses:
+        '200':
+          description: List of dark stores
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DarkStore'
+
+  /api/v1/stores/{store_id}/products:
+    get:
+      summary: List products available in a specific dark store
+      tags:
+        - Catalog
+      parameters:
+        - in: path
+          name: store_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 20
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Store catalog products with available inventory
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StoreProduct'
+
+  /api/v1/products/{id}:
+    get:
+      summary: Get product details
+      tags:
+        - Catalog
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Product details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '404':
+          description: Product not found
+
+  /api/v1/admin/categories:
+    post:
+      summary: Create category (Admin Only)
+      tags:
+        - Admin
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCategoryRequest'
+      responses:
+        '201':
+          description: Category created
+        '403':
+          description: Requires administrative privileges
+
+  /api/v1/admin/products:
+    post:
+      summary: Create product (Admin Only)
+      tags:
+        - Admin
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProductRequest'
+      responses:
+        '201':
+          description: Product created
+        '403':
+          description: Requires administrative privileges
+
+  /api/v1/admin/stores:
+    post:
+      summary: Create dark store (Admin Only)
+      tags:
+        - Admin
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDarkStoreRequest'
+      responses:
+        '201':
+          description: Dark store created
+        '403':
+          description: Requires administrative privileges
+
+  /api/v1/admin/stores/{store_id}/inventory:
+    post:
+      summary: Upsert inventory stock in dark store (Admin Only)
+      tags:
+        - Admin
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: store_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: product_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [available_quantity]
+              properties:
+                available_quantity:
+                  type: integer
+                  example: 100
+      responses:
+        '200':
+          description: Stock updated
+        '403':
+          description: Requires administrative privileges
+
+  /api/v1/cart:
+    get:
+      summary: Get current user shopping cart
+      tags:
+        - Cart
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User cart items and pricing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartResponse'
+        '401':
+          description: Unauthorized
+    delete:
+      summary: Clear entire cart
+      tags:
+        - Cart
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Cart cleared
+
+  /api/v1/cart/items:
+    post:
+      summary: Add item to shopping cart
+      tags:
+        - Cart
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddCartItemRequest'
+      responses:
+        '200':
+          description: Cart updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartResponse'
+        '409':
+          description: Cross-store cart conflict (items must be from a single dark store)
+
+  /api/v1/cart/items/{product_id}:
+    patch:
+      summary: Update quantity of item in cart
+      tags:
+        - Cart
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: product_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [quantity]
+              properties:
+                quantity:
+                  type: integer
+                  example: 3
+      responses:
+        '200':
+          description: Cart updated
+    delete:
+      summary: Remove item from cart
+      tags:
+        - Cart
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: product_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Item removed
+
+  /api/v1/checkout:
+    post:
+      summary: Checkout cart and place order
+      description: |
+        Executes an atomic checkout transaction in PostgreSQL:
+        1. Validates idempotency key to prevent duplicate charges.
+        2. Acquires row locks on store inventory in sorted product order to prevent deadlocks.
+        3. Atomically reserves stock and creates order record with 10-minute expiry.
+      tags:
+        - Orders
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema:
+            type: string
+            example: "idemp_order_user123_uuid"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckoutRequest'
+      responses:
+        '201':
+          description: Order placed and inventory reserved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          description: Cart empty or invalid delivery address
+        '409':
+          description: Insufficient stock available
+        '422':
+          description: Idempotency payload mismatch
+
+  /api/v1/orders:
+    get:
+      summary: List user orders
+      tags:
+        - Orders
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 20
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: List of user orders
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Order'
+
+  /api/v1/orders/{id}:
+    get:
+      summary: Get order by ID
+      description: Returns order details. Callers must be the order owner or hold the admin role.
+      tags:
+        - Orders
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Order details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '403':
+          description: Forbidden; order belongs to another customer
+        '404':
+          description: Order not found
+
+  /api/v1/orders/{id}/cancel:
+    post:
+      summary: Cancel placed order
+      description: Cancels order and atomically returns reserved inventory back to dark store stock.
+      tags:
+        - Orders
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  example: "Changed delivery address"
+      responses:
+        '200':
+          description: Order cancelled and stock reclaimed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '403':
+          description: Forbidden
+        '409':
+          description: Order already cancelled
+        '422':
+          description: Order cannot be cancelled in current status (e.g. out for delivery)
+
+  /api/v1/orders/{id}/pay:
+    post:
+      summary: Submit payment for order
+      description: |
+        Coordinates payment authorization and capture with exponential backoff, full jitter,
+        and stable idempotency keys. Validates caller ownership.
+      tags:
+        - Payments
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                method:
+                  type: string
+                  enum: [UPI, CARD, NETBANKING, WALLET]
+                  default: UPI
+      responses:
+        '200':
+          description: Payment captured successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+        '403':
+          description: Forbidden; not owner of order
+        '502':
+          description: Payment gateway failure or max retries exceeded
+
+  /api/v1/orders/{id}/refund:
+    post:
+      summary: Refund order payment (Admin Only)
+      tags:
+        - Payments
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  example: "Item damaged upon arrival"
+      responses:
+        '200':
+          description: Refund processed idempotently
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Refund'
+        '403':
+          description: Requires administrative privileges
+        '404':
+          description: No payments found for order
+
+  /api/v1/payments/webhook:
+    post:
+      summary: Payment gateway webhook callback
+      description: Authenticated callback from payment provider. Verifies HMAC-SHA256 signature in X-Gateway-Signature.
+      tags:
+        - Payments
+      security:
+        - GatewaySignature: []
+      parameters:
+        - in: header
+          name: X-Gateway-Signature
+          required: true
+          schema:
+            type: string
+            example: "5d41402abc4b2a76b9719d911017c592..."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                event:
+                  type: string
+                  example: "payment.succeeded"
+                order_id:
+                  type: string
+                  format: uuid
+                payment_id:
+                  type: string
+                  format: uuid
+      responses:
+        '200':
+          description: Webhook processed
+        '401':
+          description: Invalid or missing HMAC signature
+
+  /api/v1/orders/{id}/events:
+    get:
+      summary: Live order tracking stream (Server-Sent Events)
+      description: |
+        Streams real-time order lifecycle events and periodic 15-second heartbeat pings.
+        Browser EventSource clients authenticate via the query parameter `?token=<access_jwt>`.
+        Strictly enforces order ownership or admin privileges.
+      tags:
+        - Tracking
+      security:
+        - BearerAuth: []
+        - QueryToken: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: token
+          schema:
+            type: string
+            description: JWT access token for native browser EventSource connections
+      responses:
+        '200':
+          description: SSE event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                example: "event: order_update\ndata: {\"order_id\":\"...\",\"status\":\"CONFIRMED\"}\n\n"
+        '401':
+          description: Missing or expired token
+        '403':
+          description: Caller is not the order owner
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Short-lived HMAC-SHA256 JWT access token (15-minute TTL).
+    QueryToken:
+      type: apiKey
+      name: token
+      in: query
+      description: JWT token query parameter for browser EventSource SSE connections.
+    GatewaySignature:
+      type: apiKey
+      name: X-Gateway-Signature
+      in: header
+      description: HMAC-SHA256 signature of request body for payment webhook verification.
+    MetricsAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: Token
+      description: Scrape bearer token for Prometheus metrics endpoint in production.
+
+  schemas:
+    RegisterRequest:
+      type: object
+      required: [email, password, full_name, phone]
+      properties:
+        email:
+          type: string
+          format: email
+          example: "deeksha@example.com"
+        password:
+          type: string
+          minLength: 8
+          example: "SecureP@ssw0rd!2026"
+        full_name:
+          type: string
+          example: "Deeksha Sharma"
+        phone:
+          type: string
+          example: "+919876543210"
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: "deeksha@example.com"
+        password:
+          type: string
+          example: "SecureP@ssw0rd!2026"
+
+    LoginResponse:
+      type: object
+      properties:
+        tokens:
+          $ref: '#/components/schemas/TokenPair'
+        user:
+          $ref: '#/components/schemas/UserResponse'
+
+    TokenPair:
+      type: object
+      properties:
+        access_token:
+          type: string
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        refresh_token:
+          type: string
+          example: "9f82c44883ef4a5c931..."
+        access_expires_in:
+          type: integer
+          example: 900
+        refresh_expires_in:
+          type: integer
+          example: 604800
+
+    RefreshRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+          example: "9f82c44883ef4a5c931..."
+
+    UserResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        full_name:
+          type: string
+        phone:
+          type: string
+        role:
+          type: string
+          enum: [customer, admin]
+        created_at:
+          type: string
+          format: date-time
+
+    Category:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: "Dairy & Breakfast"
+        slug:
+          type: string
+          example: "dairy-breakfast"
+        description:
+          type: string
+          example: "Fresh milk, curd, cheese and eggs"
+
+    Product:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: "Amul Taaza Homogenised Toned Milk 1L"
+        sku:
+          type: string
+          example: "MILK-AMUL-1L"
+        price_paise:
+          type: integer
+          example: 7400
+        unit:
+          type: string
+          example: "1 L"
+        is_active:
+          type: boolean
+          example: true
+
+    DarkStore:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: "Indiranagar Dark Store #04"
+        latitude:
+          type: number
+          example: 12.9716
+        longitude:
+          type: number
+          example: 77.5946
+        is_active:
+          type: boolean
+          example: true
+
+    StoreProduct:
+      type: object
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        sku:
+          type: string
+        price_paise:
+          type: integer
+        available_quantity:
+          type: integer
+          example: 45
+
+    CreateCategoryRequest:
+      type: object
+      required: [name, slug]
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+
+    CreateProductRequest:
+      type: object
+      required: [category_id, name, sku, price_paise, unit]
+      properties:
+        category_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        sku:
+          type: string
+        price_paise:
+          type: integer
+        unit:
+          type: string
+
+    CreateDarkStoreRequest:
+      type: object
+      required: [name, address, latitude, longitude]
+      properties:
+        name:
+          type: string
+        address:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+
+    AddCartItemRequest:
+      type: object
+      required: [store_id, product_id, quantity]
+      properties:
+        store_id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          minimum: 1
+          example: 2
+
+    CartResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        store_id:
+          type: string
+          format: uuid
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              product_id:
+                type: string
+                format: uuid
+              product_name:
+                type: string
+              quantity:
+                type: integer
+              unit_price_paise:
+                type: integer
+              total_price_paise:
+                type: integer
+        total_items:
+          type: integer
+        total_amount_paise:
+          type: integer
+
+    CheckoutRequest:
+      type: object
+      required: [delivery_address]
+      properties:
+        delivery_address:
+          type: string
+          example: "Flat 402, Sunshine Heights, 100ft Road, Indiranagar, Bengaluru 560038"
+
+    Order:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        order_number:
+          type: string
+          example: "QC-20261023-8839"
+        user_id:
+          type: string
+          format: uuid
+        store_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [PLACED, CONFIRMED, PACKING, OUT_FOR_DELIVERY, DELIVERED, CANCELLED]
+        total_amount_paise:
+          type: integer
+          example: 14800
+        delivery_address:
+          type: string
+        idempotency_key:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    Payment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        attempt:
+          type: integer
+          example: 1
+        amount_paise:
+          type: integer
+          example: 14800
+        currency:
+          type: string
+          example: "INR"
+        status:
+          type: string
+          enum: [PENDING, CAPTURED, FAILED, REFUNDED]
+        payment_method:
+          type: string
+          example: "UPI"
+        gateway_reference:
+          type: string
+          example: "txn_auth_4f828a2b"
+
+    Refund:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        payment_id:
+          type: string
+          format: uuid
+        amount_paise:
+          type: integer
+        reason:
+          type: string
+        status:
+          type: string
+          example: "COMPLETED"
