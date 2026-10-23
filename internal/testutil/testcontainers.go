@@ -22,11 +22,14 @@ import (
 func SetupPostgresContainer(ctx context.Context, t testing.TB) (string, func()) {
 	t.Helper()
 
+	// Use BasicWaitStrategies which waits for PostgreSQL to log "database system is ready to accept connections"
+	// twice (handling the initial entrypoint bootstrap restart) and for the port to be open.
 	pgContainer, err := tcpostgres.Run(ctx,
 		"postgres:16-alpine",
 		tcpostgres.WithDatabase("quickcart_test"),
 		tcpostgres.WithUsername("quickcart"),
 		tcpostgres.WithPassword("quickcart_test_secret"),
+		tcpostgres.BasicWaitStrategies(),
 	)
 	if err != nil {
 		if os.Getenv("CI") != "" {
@@ -42,23 +45,74 @@ func SetupPostgresContainer(ctx context.Context, t testing.TB) (string, func()) 
 		t.Fatalf("Failed to retrieve PostgreSQL container connection string: %v", err)
 	}
 
-	// Apply migrations automatically
-	pool, err := pgxpool.New(ctx, connStr)
-	if err != nil {
-		_ = pgContainer.Terminate(ctx)
-		t.Fatalf("Failed to connect to PostgreSQL container: %v", err)
+	// Verify PostgreSQL container is genuinely ready to accept queries.
+	// Alpine PostgreSQL entrypoint initializes the cluster, restarts the daemon,
+	// and may briefly reset early connections before becoming stable.
+	var pool *pgxpool.Pool
+	var pingErr error
+	deadline := time.Now().Add(45 * time.Second)
+	for time.Now().Before(deadline) {
+		pool, pingErr = pgxpool.New(ctx, connStr)
+		if pingErr == nil {
+			pingCtx, pingCancel := context.WithTimeout(ctx, 2*time.Second)
+			pingErr = pool.Ping(pingCtx)
+			pingCancel()
+			if pingErr == nil {
+				var one int
+				queryCtx, queryCancel := context.WithTimeout(ctx, 2*time.Second)
+				pingErr = pool.QueryRow(queryCtx, "SELECT 1").Scan(&one)
+				queryCancel()
+				if pingErr == nil && one == 1 {
+					break
+				}
+			}
+			pool.Close()
+			pool = nil
+		}
+
+		select {
+		case <-ctx.Done():
+			_ = pgContainer.Terminate(context.Background())
+			t.Fatalf("Context cancelled while waiting for PostgreSQL readiness: %v", ctx.Err())
+		case <-time.After(500 * time.Millisecond):
+		}
 	}
 
-	if _, err := pool.Exec(ctx, migrations.SchemaV1); err != nil {
-		pool.Close()
-		_ = pgContainer.Terminate(ctx)
-		t.Fatalf("Failed to execute Migration V1 (init schema): %v", err)
+	if pingErr != nil || pool == nil {
+		_ = pgContainer.Terminate(context.Background())
+		t.Fatalf("PostgreSQL container did not become ready within timeout: %v", pingErr)
 	}
 
-	if _, err := pool.Exec(ctx, migrations.SchemaV2); err != nil {
+	// Apply migrations automatically with retry for resilience
+	var migErr error
+	for attempt := 1; attempt <= 5; attempt++ {
+		execCtx, execCancel := context.WithTimeout(ctx, 5*time.Second)
+		_, migErr = pool.Exec(execCtx, migrations.SchemaV1)
+		execCancel()
+		if migErr == nil {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if migErr != nil {
 		pool.Close()
-		_ = pgContainer.Terminate(ctx)
-		t.Fatalf("Failed to execute Migration V2 (auth refresh tokens): %v", err)
+		_ = pgContainer.Terminate(context.Background())
+		t.Fatalf("Failed to execute Migration V1 (init schema): %v", migErr)
+	}
+
+	for attempt := 1; attempt <= 5; attempt++ {
+		execCtx, execCancel := context.WithTimeout(ctx, 5*time.Second)
+		_, migErr = pool.Exec(execCtx, migrations.SchemaV2)
+		execCancel()
+		if migErr == nil {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if migErr != nil {
+		pool.Close()
+		_ = pgContainer.Terminate(context.Background())
+		t.Fatalf("Failed to execute Migration V2 (auth refresh tokens): %v", migErr)
 	}
 	pool.Close()
 

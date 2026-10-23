@@ -32,7 +32,8 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: v1.64.6
+          version: latest
+          install-mode: goinstall
           args: --timeout=5m
 
   test:
@@ -54,7 +55,7 @@ jobs:
       - name: Run Tests with Race Detector
         env:
           CI: "true"
-        run: go test -v -race -timeout 10m ./...
+        run: go test -v -race -timeout 10m $(go list ./... | grep -v /internal/testutil)
 
   integration:
     name: Testcontainers Integration Tests
