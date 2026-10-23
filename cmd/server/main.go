@@ -12,14 +12,18 @@ import (
 	"time"
 	_ "time/tzdata"
 
+	"github.com/Dhanya562004/quickcart-go/api"
+	"github.com/Dhanya562004/quickcart-go/internal/auth"
 	"github.com/Dhanya562004/quickcart-go/internal/cart"
 	"github.com/Dhanya562004/quickcart-go/internal/catalog"
 	"github.com/Dhanya562004/quickcart-go/internal/config"
 	"github.com/Dhanya562004/quickcart-go/internal/db"
 	"github.com/Dhanya562004/quickcart-go/internal/inventory"
 	"github.com/Dhanya562004/quickcart-go/internal/order"
+	"github.com/Dhanya562004/quickcart-go/internal/payment"
 	"github.com/Dhanya562004/quickcart-go/internal/platform/database"
 	"github.com/Dhanya562004/quickcart-go/internal/platform/logger"
+	"github.com/Dhanya562004/quickcart-go/internal/platform/metrics"
 	"github.com/Dhanya562004/quickcart-go/internal/platform/middleware"
 	"github.com/Dhanya562004/quickcart-go/internal/platform/redis"
 	"github.com/Dhanya562004/quickcart-go/internal/queue"
@@ -30,7 +34,7 @@ import (
 
 var (
 	// Version can be injected at build time via -ldflags="-X main.Version=..."
-	Version = "1.0.0-phase4"
+	Version = "1.0.0-phase5"
 )
 
 func main() {
@@ -177,6 +181,20 @@ func SetupRouter(
 	r.Use(middleware.StructuredLogger(log))
 	r.Use(middleware.Recovery(log))
 	r.Use(middleware.CORS())
+	r.Use(metrics.Middleware())
+
+	// Prometheus Metrics endpoint with production protection
+	r.GET("/metrics", metrics.AuthMiddleware(cfg.MetricsToken, string(cfg.Environment)), metrics.Handler())
+
+	// OpenAPI 3.0 Specification and Swagger UI Documentation
+	r.GET("/docs", func(c *gin.Context) {
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.String(http.StatusOK, api.SwaggerUIHTML)
+	})
+	r.GET("/api/openapi.yaml", func(c *gin.Context) {
+		c.Header("Content-Type", "application/yaml; charset=utf-8")
+		_, _ = c.Writer.Write(api.OpenAPISpec)
+	})
 
 	// Liveness check (K8s / Load Balancer) - returns 200 if process is running
 	r.GET("/healthz", func(c *gin.Context) {
@@ -228,7 +246,7 @@ func SetupRouter(
 		})
 	})
 
-	// System Information endpoint
+	// System Information and API routes
 	v1 := r.Group("/api/v1")
 	{
 		// Apply Redis Lua rate limiter if available
@@ -246,29 +264,49 @@ func SetupRouter(
 			})
 		})
 
+		// Initialize JWT Token Manager
+		tokenConfig := auth.DefaultTokenConfig(cfg.JWTSecret)
+		tokenConfig.AccessTokenTTL = cfg.JWTAccessTTL
+		tokenConfig.RefreshTokenTTL = cfg.JWTRefreshTTL
+		tokenMgr := auth.NewTokenManager(tokenConfig, nil)
+
+		authMiddleware := auth.Authenticate(tokenMgr)
+		adminMiddleware := auth.RequireRole(auth.RoleAdmin)
+
 		// Register domain modules when database is connected
 		if dbConn != nil && dbConn.Pool != nil && queries != nil {
+			authRepo := auth.NewRepository(dbConn.Pool)
+			authSvc := auth.NewService(authRepo, tokenMgr, log)
+			authHandler := auth.NewHandler(authSvc)
+			authHandler.RegisterRoutes(v1, authMiddleware)
+
 			catRepo := catalog.NewRepository(queries)
 			if redisClient != nil {
 				catRepo = catalog.NewCachedRepository(catRepo, redisClient)
 			}
 			catSvc := catalog.NewService(catRepo)
 			catHandler := catalog.NewHandler(catSvc)
-			catHandler.RegisterRoutes(v1)
+			catHandler.RegisterRoutes(v1, authMiddleware)
 
 			cartRepo := cart.NewRepository(queries)
 			cartSvc := cart.NewService(cartRepo)
 			cartHandler := cart.NewHandler(cartSvc)
-			cartHandler.RegisterRoutes(v1)
+			cartHandler.RegisterRoutes(v1, authMiddleware)
 
 			orderRepo := order.NewRepository(dbConn.Pool)
 			orderSvc := order.NewService(orderRepo, cartSvc)
 			orderHandler := order.NewHandler(orderSvc)
-			orderHandler.RegisterRoutes(v1)
+			orderHandler.RegisterRoutes(v1, authMiddleware)
+
+			paymentRepo := payment.NewRepository(queries)
+			paymentGateway := payment.NewFakeGateway()
+			paymentSvc := payment.NewService(paymentRepo, paymentGateway, nil, payment.DefaultRetryPolicy(), log)
+			paymentHandler := payment.NewHandler(paymentSvc, orderRepo, "quickcart-webhook-secret-key-32bytes")
+			paymentHandler.RegisterRoutes(v1, authMiddleware, adminMiddleware)
 
 			if sseHub != nil {
 				sseHandler := tracking.NewHandler(sseHub, orderRepo, 15*time.Second)
-				sseHandler.RegisterRoutes(v1)
+				sseHandler.RegisterRoutes(v1, authMiddleware)
 			}
 		}
 	}

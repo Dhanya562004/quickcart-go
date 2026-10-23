@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/Dhanya562004/quickcart-go/internal/auth"
 	"github.com/Dhanya562004/quickcart-go/internal/order"
 )
 
@@ -37,13 +38,15 @@ func NewHandler(hub *SSEHub, orderLookup OrderLookup, heartbeatInterval time.Dur
 }
 
 // RegisterRoutes registers the SSE streaming endpoint on the provided router group.
-func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
-	rg.GET("/orders/:id/events", h.StreamOrderEvents)
+func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, authMiddleware ...gin.HandlerFunc) {
+	handlers := append(authMiddleware, h.StreamOrderEvents)
+	rg.GET("/orders/:id/events", handlers...)
 }
 
 // StreamOrderEvents handles GET /api/v1/orders/:id/events.
 // Guarantees:
 // 1. Order ownership verification: returns HTTP 403 if requester does not own the order and is not admin.
+//    Derives caller identity strictly from authenticated JWT context, rejecting spoofed headers/params.
 // 2. Regular heartbeats every 15s to keep proxy connections (Nginx, AWS ALB) from terminating idle streams.
 // 3. Clean exit on disconnect: when client closes connection, c.Request.Context().Done() unregisters
 //    the subscriber channel and terminates the handler goroutine immediately without leaking.
@@ -66,17 +69,15 @@ func (h *Handler) StreamOrderEvents(c *gin.Context) {
 		return
 	}
 
-	// 2. Verify ownership (supports both X-User-ID header and ?user_id= query param for browser EventSource)
-	callerID := c.GetHeader("X-User-ID")
-	if callerID == "" {
-		callerID = c.Query("user_id")
+	// 2. Verify server-side authenticated identity (RBAC & ownership)
+	callerID, ok := auth.GetUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized; authentication required"})
+		return
 	}
-	callerRole := c.GetHeader("X-User-Role")
-	if callerRole == "" {
-		callerRole = c.Query("role")
-	}
+	callerRole := auth.GetUserRole(c)
 
-	if callerRole != "admin" && (callerID == "" || callerID != ord.UserID.String()) {
+	if callerRole != auth.RoleAdmin && callerID != ord.UserID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden; you do not have permission to view this order stream"})
 		return
 	}

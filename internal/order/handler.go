@@ -17,9 +17,17 @@ func NewHandler(svc Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
-	rg.POST("/checkout", h.Checkout)
+func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, middlewares ...gin.HandlerFunc) {
+	checkoutGroup := rg.Group("")
+	for _, m := range middlewares {
+		checkoutGroup.Use(m)
+	}
+	checkoutGroup.POST("/checkout", h.Checkout)
+
 	orders := rg.Group("/orders")
+	for _, m := range middlewares {
+		orders.Use(m)
+	}
 	{
 		orders.GET("", h.ListOrders)
 		orders.GET("/:id", h.GetOrder)
@@ -28,21 +36,27 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 }
 
 func getUserID(c *gin.Context) (uuid.UUID, error) {
-	header := c.GetHeader("X-User-ID")
-	if header == "" {
-		return uuid.Nil, errors.New("missing X-User-ID header")
+	if val, exists := c.Get("auth_user_id"); exists {
+		if u, ok := val.(uuid.UUID); ok && u != uuid.Nil {
+			return u, nil
+		}
 	}
-	u, err := uuid.Parse(header)
-	if err != nil {
-		return uuid.Nil, errors.New("invalid X-User-ID header UUID format")
+	return uuid.Nil, errors.New("unauthorized; authentication required")
+}
+
+func getUserRole(c *gin.Context) string {
+	if val, exists := c.Get("auth_user_role"); exists {
+		if r, ok := val.(string); ok {
+			return r
+		}
 	}
-	return u, nil
+	return ""
 }
 
 func (h *Handler) Checkout(c *gin.Context) {
 	userID, err := getUserID(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -89,7 +103,7 @@ func (h *Handler) Checkout(c *gin.Context) {
 func (h *Handler) GetOrder(c *gin.Context) {
 	userID, err := getUserID(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -99,7 +113,14 @@ func (h *Handler) GetOrder(c *gin.Context) {
 		return
 	}
 
-	ord, err := h.svc.GetOrder(c.Request.Context(), userID, orderID)
+	role := getUserRole(c)
+	var ord *Order
+	if role == "admin" {
+		ord, err = h.svc.GetOrderByAdmin(c.Request.Context(), orderID)
+	} else {
+		ord, err = h.svc.GetOrder(c.Request.Context(), userID, orderID)
+	}
+
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "order not found"})
@@ -119,7 +140,7 @@ func (h *Handler) GetOrder(c *gin.Context) {
 func (h *Handler) ListOrders(c *gin.Context) {
 	userID, err := getUserID(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -148,7 +169,7 @@ func (h *Handler) ListOrders(c *gin.Context) {
 func (h *Handler) CancelOrder(c *gin.Context) {
 	userID, err := getUserID(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -164,7 +185,14 @@ func (h *Handler) CancelOrder(c *gin.Context) {
 		return
 	}
 
-	ord, err := h.svc.CancelOrder(c.Request.Context(), userID, orderID, req)
+	role := getUserRole(c)
+	var ord *Order
+	if role == "admin" {
+		ord, err = h.svc.CancelOrderByAdmin(c.Request.Context(), orderID, req)
+	} else {
+		ord, err = h.svc.CancelOrder(c.Request.Context(), userID, orderID, req)
+	}
+
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "order not found"})
@@ -188,3 +216,4 @@ func (h *Handler) CancelOrder(c *gin.Context) {
 
 	c.JSON(http.StatusOK, ord)
 }
+

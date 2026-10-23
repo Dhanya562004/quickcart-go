@@ -46,6 +46,12 @@ type Config struct {
 	// Concurrency Worker Pool
 	WorkerPoolSize     int           `json:"worker_pool_size"`
 	WorkerDrainTimeout time.Duration `json:"worker_drain_timeout"`
+
+	// Authentication & Metrics
+	JWTSecret      string        `json:"jwt_secret"`
+	JWTAccessTTL   time.Duration `json:"jwt_access_ttl"`
+	JWTRefreshTTL  time.Duration `json:"jwt_refresh_ttl"`
+	MetricsToken   string        `json:"metrics_token"`
 }
 
 // Load loads application configuration from environment variables with safe defaults.
@@ -67,6 +73,10 @@ func Load() (*Config, error) {
 		RateLimitWindow:   getEnvDuration("RATE_LIMIT_WINDOW", 1*time.Minute),
 		WorkerPoolSize:     getEnvInt("WORKER_POOL_SIZE", 4),
 		WorkerDrainTimeout: getEnvDuration("WORKER_DRAIN_TIMEOUT", 5*time.Second),
+		JWTSecret:          getEnv("JWT_SECRET", "quickcart-dev-jwt-super-secret-key-32bytes-min"),
+		JWTAccessTTL:       getEnvDuration("JWT_ACCESS_TTL", 15*time.Minute),
+		JWTRefreshTTL:      getEnvDuration("JWT_REFRESH_TTL", 7*24*time.Hour),
+		MetricsToken:       getEnv("METRICS_TOKEN", "quickcart-metrics-scrape-token"),
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -80,6 +90,13 @@ func Load() (*Config, error) {
 func (c *Config) Validate() error {
 	if c.ServerPort == "" {
 		return errors.New("SERVER_PORT cannot be empty")
+	}
+
+	if c.JWTSecret == "" {
+		return errors.New("JWT_SECRET cannot be empty")
+	}
+	if c.Environment == EnvProduction && len(c.JWTSecret) < 32 {
+		return errors.New("JWT_SECRET must be at least 32 characters in production")
 	}
 
 	portNum, err := strconv.Atoi(c.ServerPort)

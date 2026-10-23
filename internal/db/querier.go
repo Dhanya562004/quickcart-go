@@ -27,7 +27,10 @@ type Querier interface {
 	CreateOrderItem(ctx context.Context, arg CreateOrderItemParams) (OrderItem, error)
 	CreatePaymentAttempt(ctx context.Context, arg CreatePaymentAttemptParams) (Payment, error)
 	CreateProduct(ctx context.Context, arg CreateProductParams) (Product, error)
+	CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) (RefreshToken, error)
 	CreateRefund(ctx context.Context, arg CreateRefundParams) (Refund, error)
+	// User and Authentication Queries
+	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	// Finalizes stock consumption upon order fulfillment
 	DeductReservedInventoryAtomic(ctx context.Context, arg DeductReservedInventoryAtomicParams) (DeductReservedInventoryAtomicRow, error)
 	DeleteCartItem(ctx context.Context, arg DeleteCartItemParams) error
@@ -47,10 +50,13 @@ type Querier interface {
 	GetPaymentByOrderAndAttempt(ctx context.Context, arg GetPaymentByOrderAndAttemptParams) (Payment, error)
 	GetPaymentByOrderAndIdempotencyKey(ctx context.Context, arg GetPaymentByOrderAndIdempotencyKeyParams) (Payment, error)
 	GetProductByID(ctx context.Context, id pgtype.UUID) (Product, error)
+	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (RefreshToken, error)
 	GetRefundsByPaymentID(ctx context.Context, paymentID pgtype.UUID) ([]Refund, error)
 	GetReservationsByOrderID(ctx context.Context, orderID pgtype.UUID) ([]InventoryReservation, error)
 	// Core Inventory and Reservation Queries (Zero-Overselling Engine)
 	GetStoreInventory(ctx context.Context, arg GetStoreInventoryParams) (StoreInventory, error)
+	GetUserByEmail(ctx context.Context, email string) (User, error)
+	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 	InsertOrderStatusHistory(ctx context.Context, arg InsertOrderStatusHistoryParams) (OrderStatusHistory, error)
 	// Catalog Domain Queries
 	ListCategories(ctx context.Context) ([]Category, error)
@@ -59,6 +65,7 @@ type Querier interface {
 	ListProductsByStore(ctx context.Context, arg ListProductsByStoreParams) ([]ListProductsByStoreRow, error)
 	// Transition from RESERVED -> EXPIRED guarded by status check
 	MarkReservationExpired(ctx context.Context, id pgtype.UUID) (MarkReservationExpiredRow, error)
+	PickActiveRefreshTokenForRotation(ctx context.Context, tokenHash string) (RefreshToken, error)
 	// Expiry worker claims up to $1 expired reservations safely using FOR UPDATE SKIP LOCKED
 	PickExpiredReservationsForUpdate(ctx context.Context, limit int32) ([]PickExpiredReservationsForUpdateRow, error)
 	// Transition from RESERVED -> RELEASED guarded by status check
@@ -69,6 +76,8 @@ type Querier interface {
 	ReserveInventoryAtomic(ctx context.Context, arg ReserveInventoryAtomicParams) (ReserveInventoryAtomicRow, error)
 	// Releases reservation back to available stock
 	RestoreInventoryAtomic(ctx context.Context, arg RestoreInventoryAtomicParams) (RestoreInventoryAtomicRow, error)
+	RevokeAllUserRefreshTokens(ctx context.Context, userID pgtype.UUID) error
+	RevokeRefreshToken(ctx context.Context, tokenHash string) (RefreshToken, error)
 	UpdateCartItemQuantity(ctx context.Context, arg UpdateCartItemQuantityParams) (CartItem, error)
 	UpdateCartStore(ctx context.Context, arg UpdateCartStoreParams) (Cart, error)
 	UpdateIdempotencyRecord(ctx context.Context, arg UpdateIdempotencyRecordParams) (IdempotencyKey, error)

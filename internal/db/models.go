@@ -135,6 +135,16 @@ type Product struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
+type RefreshToken struct {
+	ID        pgtype.UUID        `json:"id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	TokenHash string             `json:"token_hash"`
+	Revoked   bool               `json:"revoked"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Refund struct {
 	ID          pgtype.UUID        `json:"id"`
 	PaymentID   pgtype.UUID        `json:"payment_id"`

@@ -17,7 +17,7 @@ func NewHandler(svc Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
+func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, adminMiddlewares ...gin.HandlerFunc) {
 	// Public Catalog Routes
 	rg.GET("/categories", h.ListCategories)
 	rg.GET("/categories/:id", h.GetCategory)
@@ -25,8 +25,12 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/stores/:store_id/products", h.ListProductsByStore)
 	rg.GET("/products/:id", h.GetProduct)
 
-	// Admin-Only Routes
-	admin := rg.Group("/admin", requireAdminMiddleware())
+	// Admin-Only Routes: Require valid authentication and administrative role
+	admin := rg.Group("/admin")
+	for _, m := range adminMiddlewares {
+		admin.Use(m)
+	}
+	admin.Use(requireAdminMiddleware())
 	{
 		admin.POST("/categories", h.CreateCategory)
 		admin.POST("/products", h.CreateProduct)
@@ -38,8 +42,8 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 
 func requireAdminMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		role := c.GetHeader("X-User-Role")
-		if role != "admin" {
+		roleVal, exists := c.Get("auth_user_role")
+		if !exists || roleVal != "admin" {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
 				"error": "admin authorization required",
 			})

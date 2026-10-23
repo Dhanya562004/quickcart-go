@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
+	"github.com/Dhanya562004/quickcart-go/internal/auth"
 	"github.com/Dhanya562004/quickcart-go/internal/order"
 	"github.com/Dhanya562004/quickcart-go/internal/tracking"
 )
@@ -22,12 +23,16 @@ type mockOrderLookup struct {
 	orders map[uuid.UUID]*order.Order
 }
 
-func (m *mockOrderLookup) GetOrderByID(ctx context.Context, id uuid.UUID) (*order.Order, error) {
+func (m *mockOrderLookup) GetOrderByID(_ context.Context, id uuid.UUID) (*order.Order, error) {
 	ord, exists := m.orders[id]
 	if !exists {
 		return nil, order.ErrNotFound
 	}
 	return ord, nil
+}
+
+func setupTestTokenManager() auth.TokenManager {
+	return auth.NewTokenManager(auth.DefaultTokenConfig("sse-test-secret-key-32-bytes-long!"), nil)
 }
 
 func TestSSE_PublishAndReceive(t *testing.T) {
@@ -64,9 +69,23 @@ func TestSSEHandler_AccessControl_OwnershipEnforced(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	gin.SetMode(gin.TestMode)
 
+	tm := setupTestTokenManager()
 	hub := tracking.NewSSEHub()
+
 	ownerID := uuid.New()
+	otherID := uuid.New()
+	adminID := uuid.New()
 	orderID := uuid.New()
+
+	// Generate authenticated tokens
+	ownerToken, err := tm.GenerateTokenPair(auth.User{ID: ownerID, Email: "owner@quickcart.in", Role: auth.RoleCustomer})
+	require.NoError(t, err)
+
+	otherToken, err := tm.GenerateTokenPair(auth.User{ID: otherID, Email: "other@quickcart.in", Role: auth.RoleCustomer})
+	require.NoError(t, err)
+
+	adminToken, err := tm.GenerateTokenPair(auth.User{ID: adminID, Email: "admin@quickcart.in", Role: auth.RoleAdmin})
+	require.NoError(t, err)
 
 	mockOrders := &mockOrderLookup{
 		orders: map[uuid.UUID]*order.Order{
@@ -80,35 +99,69 @@ func TestSSEHandler_AccessControl_OwnershipEnforced(t *testing.T) {
 
 	handler := tracking.NewHandler(hub, mockOrders, 5*time.Second)
 	r := gin.New()
-	r.GET("/api/v1/orders/:id/events", handler.StreamOrderEvents)
+	handler.RegisterRoutes(r.Group("/api/v1"), auth.Authenticate(tm))
 
-	// Case 1: Unauthorized user receives 403 Forbidden
-	otherUser := uuid.New().String()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/orders/"+orderID.String()+"/events", nil)
-	req.Header.Set("X-User-ID", otherUser)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	// 1. Anonymous request without token -> 401 Unauthorized
+	reqAnon := httptest.NewRequest(http.MethodGet, "/api/v1/orders/"+orderID.String()+"/events", nil)
+	wAnon := httptest.NewRecorder()
+	r.ServeHTTP(wAnon, reqAnon)
+	assert.Equal(t, http.StatusUnauthorized, wAnon.Code)
 
-	assert.Equal(t, http.StatusForbidden, w.Code)
-	assert.Contains(t, w.Body.String(), "forbidden")
+	// 2. Spoofed headers/params ignored -> 401 Unauthorized
+	reqSpoofed := httptest.NewRequest(http.MethodGet, "/api/v1/orders/"+orderID.String()+"/events?user_id="+ownerID.String(), nil)
+	reqSpoofed.Header.Set("X-User-ID", ownerID.String())
+	reqSpoofed.Header.Set("X-User-Role", "admin")
+	wSpoofed := httptest.NewRecorder()
+	r.ServeHTTP(wSpoofed, reqSpoofed)
+	assert.Equal(t, http.StatusUnauthorized, wSpoofed.Code, "unverified headers/query parameters MUST NOT be trusted")
 
-	// Case 2: Non-existent order receives 404
+	// 3. Cross-user access (Customer B attempts to access Customer A's order) -> 403 Forbidden
+	reqCross := httptest.NewRequest(http.MethodGet, "/api/v1/orders/"+orderID.String()+"/events", nil)
+	reqCross.Header.Set("Authorization", "Bearer "+otherToken.AccessToken)
+	wCross := httptest.NewRecorder()
+	r.ServeHTTP(wCross, reqCross)
+	assert.Equal(t, http.StatusForbidden, wCross.Code)
+
+	// 4. Non-existent order -> 404 Not Found
 	missingID := uuid.New().String()
 	req404 := httptest.NewRequest(http.MethodGet, "/api/v1/orders/"+missingID+"/events", nil)
-	req404.Header.Set("X-User-ID", ownerID.String())
+	req404.Header.Set("Authorization", "Bearer "+ownerToken.AccessToken)
 	w404 := httptest.NewRecorder()
 	r.ServeHTTP(w404, req404)
-
 	assert.Equal(t, http.StatusNotFound, w404.Code)
+
+	// 5. Admin can access any order stream
+	ctxAdmin, cancelAdmin := context.WithCancel(context.Background())
+	defer cancelAdmin()
+	reqAdmin := httptest.NewRequest(http.MethodGet, "/api/v1/orders/"+orderID.String()+"/events", nil).WithContext(ctxAdmin)
+	reqAdmin.Header.Set("Authorization", "Bearer "+adminToken.AccessToken)
+	wAdmin := httptest.NewRecorder()
+
+	var wgAdmin sync.WaitGroup
+	wgAdmin.Add(1)
+	go func() {
+		defer wgAdmin.Done()
+		r.ServeHTTP(wAdmin, reqAdmin)
+	}()
+
+	require.Eventually(t, func() bool {
+		return hub.SubscriberCount(orderID) == 1
+	}, 500*time.Millisecond, 10*time.Millisecond)
+	cancelAdmin()
+	wgAdmin.Wait()
 }
 
-func TestSSEHandler_ClientDisconnect_CleanExit(t *testing.T) {
+func TestSSEHandler_BrowserEventSource_QueryParamToken(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	gin.SetMode(gin.TestMode)
 
+	tm := setupTestTokenManager()
 	hub := tracking.NewSSEHub()
 	ownerID := uuid.New()
 	orderID := uuid.New()
+
+	ownerToken, err := tm.GenerateTokenPair(auth.User{ID: ownerID, Email: "owner@quickcart.in", Role: auth.RoleCustomer})
+	require.NoError(t, err)
 
 	mockOrders := &mockOrderLookup{
 		orders: map[uuid.UUID]*order.Order{
@@ -120,14 +173,13 @@ func TestSSEHandler_ClientDisconnect_CleanExit(t *testing.T) {
 		},
 	}
 
-	handler := tracking.NewHandler(hub, mockOrders, 50*time.Millisecond) // short heartbeat for testing
+	handler := tracking.NewHandler(hub, mockOrders, 50*time.Millisecond)
 	r := gin.New()
-	r.GET("/api/v1/orders/:id/events", handler.StreamOrderEvents)
+	handler.RegisterRoutes(r.Group("/api/v1"), auth.Authenticate(tm))
 
-	// Create request with cancellable context
+	// Browser EventSource connects via: GET /api/v1/orders/:id/events?token=<jwt_access_token>
 	ctx, cancel := context.WithCancel(context.Background())
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/orders/"+orderID.String()+"/events", nil).WithContext(ctx)
-	req.Header.Set("X-User-ID", ownerID.String())
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/orders/"+orderID.String()+"/events?token="+ownerToken.AccessToken, nil).WithContext(ctx)
 	w := httptest.NewRecorder()
 
 	var wg sync.WaitGroup
@@ -137,12 +189,58 @@ func TestSSEHandler_ClientDisconnect_CleanExit(t *testing.T) {
 		r.ServeHTTP(w, req)
 	}()
 
-	// Wait until client has subscribed
 	require.Eventually(t, func() bool {
 		return hub.SubscriberCount(orderID) == 1
 	}, 500*time.Millisecond, 10*time.Millisecond)
 
-	// Publish an event while client is connected
+	cancel()
+	wg.Wait()
+
+	assert.Equal(t, 0, hub.SubscriberCount(orderID))
+}
+
+func TestSSEHandler_ClientDisconnect_CleanExit(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	gin.SetMode(gin.TestMode)
+
+	tm := setupTestTokenManager()
+	hub := tracking.NewSSEHub()
+	ownerID := uuid.New()
+	orderID := uuid.New()
+
+	ownerToken, err := tm.GenerateTokenPair(auth.User{ID: ownerID, Email: "owner@quickcart.in", Role: auth.RoleCustomer})
+	require.NoError(t, err)
+
+	mockOrders := &mockOrderLookup{
+		orders: map[uuid.UUID]*order.Order{
+			orderID: {
+				ID:     orderID,
+				UserID: ownerID,
+				Status: order.StatusPlaced,
+			},
+		},
+	}
+
+	handler := tracking.NewHandler(hub, mockOrders, 50*time.Millisecond)
+	r := gin.New()
+	handler.RegisterRoutes(r.Group("/api/v1"), auth.Authenticate(tm))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/orders/"+orderID.String()+"/events", nil).WithContext(ctx)
+	req.Header.Set("Authorization", "Bearer "+ownerToken.AccessToken)
+	w := httptest.NewRecorder()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		r.ServeHTTP(w, req)
+	}()
+
+	require.Eventually(t, func() bool {
+		return hub.SubscriberCount(orderID) == 1
+	}, 500*time.Millisecond, 10*time.Millisecond)
+
 	hub.Publish(tracking.OrderEvent{
 		OrderID:   orderID,
 		Status:    "CONFIRMED",
@@ -150,11 +248,9 @@ func TestSSEHandler_ClientDisconnect_CleanExit(t *testing.T) {
 		Timestamp: time.Now().UTC(),
 	})
 
-	// Client disconnects mid-stream
 	cancel()
 	wg.Wait()
 
-	// Verify subscriber channel was immediately unregistered
 	assert.Equal(t, 0, hub.SubscriberCount(orderID), "subscriber count must be 0 after client disconnect")
 	assert.Equal(t, http.StatusOK, w.Code)
 }
