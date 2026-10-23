@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  quickcart-db:
+    image: postgres:16-alpine
+    container_name: quickcart-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: quickcart
+      POSTGRES_PASSWORD: quickcart_secret
+      POSTGRES_DB: quickcart
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../migrations/000001_init_schema.up.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quickcart -d quickcart"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - quickcart-net
+
+  quickcart-redis:
+    image: redis:7-alpine
+    container_name: quickcart-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - quickcart-net
+
+  quickcart-api:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+    container_name: quickcart-api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      SERVER_PORT: "8080"
+      SERVER_HOST: "0.0.0.0"
+      APP_ENV: "development"
+      LOG_LEVEL: "debug"
+      DATABASE_URL: "postgres://quickcart:quickcart_secret@quickcart-db:5432/quickcart?sslmode=disable"
+      REDIS_URL: "redis://quickcart-redis:6379/0"
+      DB_MAX_CONNS: "25"
+      DB_MIN_CONNS: "5"
+    depends_on:
+      quickcart-db:
+        condition: service_healthy
+      quickcart-redis:
+        condition: service_healthy
+    networks:
+      - quickcart-net
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  quickcart-net:
+    driver: bridge
