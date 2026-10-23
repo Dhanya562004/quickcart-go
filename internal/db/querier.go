@@ -25,7 +25,9 @@ type Querier interface {
 	// Order Domain Queries
 	CreateOrder(ctx context.Context, arg CreateOrderParams) (Order, error)
 	CreateOrderItem(ctx context.Context, arg CreateOrderItemParams) (OrderItem, error)
+	CreatePaymentAttempt(ctx context.Context, arg CreatePaymentAttemptParams) (Payment, error)
 	CreateProduct(ctx context.Context, arg CreateProductParams) (Product, error)
+	CreateRefund(ctx context.Context, arg CreateRefundParams) (Refund, error)
 	// Finalizes stock consumption upon order fulfillment
 	DeductReservedInventoryAtomic(ctx context.Context, arg DeductReservedInventoryAtomicParams) (DeductReservedInventoryAtomicRow, error)
 	DeleteCartItem(ctx context.Context, arg DeleteCartItemParams) error
@@ -37,11 +39,15 @@ type Querier interface {
 	GetDatabaseVersion(ctx context.Context) (string, error)
 	// Idempotency Domain Queries
 	GetIdempotencyRecord(ctx context.Context, arg GetIdempotencyRecordParams) (IdempotencyKey, error)
+	GetLatestPaymentForOrder(ctx context.Context, orderID pgtype.UUID) (Payment, error)
 	GetOrderByID(ctx context.Context, id pgtype.UUID) (Order, error)
 	GetOrderByUserAndIdempotencyKey(ctx context.Context, arg GetOrderByUserAndIdempotencyKeyParams) (Order, error)
 	GetOrderItemsByOrderID(ctx context.Context, orderID pgtype.UUID) ([]GetOrderItemsByOrderIDRow, error)
 	GetOrderStatusHistoryByOrderID(ctx context.Context, orderID pgtype.UUID) ([]OrderStatusHistory, error)
+	GetPaymentByOrderAndAttempt(ctx context.Context, arg GetPaymentByOrderAndAttemptParams) (Payment, error)
+	GetPaymentByOrderAndIdempotencyKey(ctx context.Context, arg GetPaymentByOrderAndIdempotencyKeyParams) (Payment, error)
 	GetProductByID(ctx context.Context, id pgtype.UUID) (Product, error)
+	GetRefundsByPaymentID(ctx context.Context, paymentID pgtype.UUID) ([]Refund, error)
 	GetReservationsByOrderID(ctx context.Context, orderID pgtype.UUID) ([]InventoryReservation, error)
 	// Core Inventory and Reservation Queries (Zero-Overselling Engine)
 	GetStoreInventory(ctx context.Context, arg GetStoreInventoryParams) (StoreInventory, error)
@@ -67,6 +73,7 @@ type Querier interface {
 	UpdateCartStore(ctx context.Context, arg UpdateCartStoreParams) (Cart, error)
 	UpdateIdempotencyRecord(ctx context.Context, arg UpdateIdempotencyRecordParams) (IdempotencyKey, error)
 	UpdateOrderStatus(ctx context.Context, arg UpdateOrderStatusParams) (Order, error)
+	UpdatePaymentStatus(ctx context.Context, arg UpdatePaymentStatusParams) (Payment, error)
 	UpdateProduct(ctx context.Context, arg UpdateProductParams) (Product, error)
 	UpsertCartItem(ctx context.Context, arg UpsertCartItemParams) (CartItem, error)
 	UpsertStoreInventory(ctx context.Context, arg UpsertStoreInventoryParams) (StoreInventory, error)
