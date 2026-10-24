@@ -9,8 +9,9 @@ services:
       POSTGRES_USER: quickcart
       POSTGRES_PASSWORD: quickcart_secret
       POSTGRES_DB: quickcart
+    # Not publicly exposed: bound to localhost for administrative inspection only
     ports:
-      - "${DB_HOST_PORT:-5433}:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ../migrations/000001_init_schema.up.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
@@ -27,8 +28,9 @@ services:
     image: redis:7-alpine
     container_name: quickcart-redis
     restart: unless-stopped
+    # Not publicly exposed: bound to localhost for administrative inspection only
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -48,7 +50,7 @@ services:
     environment:
       SERVER_PORT: "8080"
       SERVER_HOST: "0.0.0.0"
-      APP_ENV: "development"
+      APP_ENV: "production"
       LOG_LEVEL: "info"
       INSTANCE_ID: "api-instance-1"
       DATABASE_URL: "postgres://quickcart:quickcart_secret@quickcart-db:5432/quickcart?sslmode=disable"
@@ -75,7 +77,7 @@ services:
     environment:
       SERVER_PORT: "8080"
       SERVER_HOST: "0.0.0.0"
-      APP_ENV: "development"
+      APP_ENV: "production"
       LOG_LEVEL: "info"
       INSTANCE_ID: "api-instance-2"
       DATABASE_URL: "postgres://quickcart:quickcart_secret@quickcart-db:5432/quickcart?sslmode=disable"
@@ -102,7 +104,7 @@ services:
     environment:
       SERVER_PORT: "8080"
       SERVER_HOST: "0.0.0.0"
-      APP_ENV: "development"
+      APP_ENV: "production"
       LOG_LEVEL: "info"
       INSTANCE_ID: "api-instance-3"
       DATABASE_URL: "postgres://quickcart:quickcart_secret@quickcart-db:5432/quickcart?sslmode=disable"
@@ -140,7 +142,7 @@ services:
     container_name: quickcart-prometheus
     restart: unless-stopped
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     command:
@@ -160,7 +162,7 @@ services:
     container_name: quickcart-grafana
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
