@@ -83,22 +83,22 @@ QuickCart is deployed end-to-end on global managed cloud infrastructure:
 QuickCart is structured as an idiomatic **Go modular monolith** paired with a modern **React 18 SPA** hosted across distributed edge infrastructure.
 
 ```mermaid
-flowchart TD
-    subgraph Clients["Customer & Admin Tier"]
-        Storefront["🌐 React 18 Storefront<br/>(Cloudflare Pages Edge)"]
-        SwaggerUI["📖 Swagger UI Browser<br/>(/docs)"]
-        MobileClient["📱 Future Mobile Apps"]
+graph TD
+    subgraph Clients["Customer & Edge Tier"]
+        Storefront["React 18 Storefront<br/>Cloudflare Pages Edge"]
+        SwaggerUI["Swagger UI Browser<br/>Path: /docs"]
+        MobileClient["Mobile & API Clients"]
     end
 
     subgraph EdgeNetwork["Cloudflare Global Network"]
         CFEdge["Edge CDN & TLS Termination<br/>e8ea0078.quickcart-go.pages.dev"]
     end
 
-    subgraph RenderPlatform["Render Managed Cloud (Go 1.25 Runtime)"]
-        Router["Gin HTTP Router (:PORT)<br/>quickcart-go.onrender.com"]
+    subgraph RenderPlatform["Render Managed Cloud - Go 1.25 Runtime"]
+        Router["Gin HTTP Router<br/>quickcart-go.onrender.com"]
         
         subgraph Middlewares["Middleware Pipeline"]
-            ReqID["Request ID (UUIDv4)"]
+            ReqID["Request ID UUIDv4"]
             Logger["Structured slog"]
             Recovery["Panic Recovery"]
             CORS["Scoped CORS Policy"]
@@ -107,29 +107,29 @@ flowchart TD
         end
 
         subgraph CoreDomains["Modular Domain Services"]
-            AuthSvc["Auth Service<br/>(Bcrypt, JWT, SHA-256 Rotation)"]
-            CatalogSvc["Catalog Service<br/>(Store Inventory, Categories)"]
-            CartSvc["Cart Service<br/>(Single-Store Affinity)"]
-            OrderSvc["Order Service<br/>(Atomic ACID Checkout)"]
-            PaymentSvc["Payment Service<br/>(Jittered Backoff, Webhooks)"]
+            AuthSvc["Auth Service"]
+            CatalogSvc["Catalog Service"]
+            CartSvc["Cart Service"]
+            OrderSvc["Order Service"]
+            PaymentSvc["Payment Service"]
         end
 
         subgraph ConcurrencySubsystem["Background Concurrency Engine"]
-            ChannelQueue["Bounded Task Buffer (1000)"]
+            ChannelQueue["Bounded Task Buffer - 1000 items"]
             WorkerPool["Goroutine Worker Pool"]
-            ExpiryWorker["Reservation Sweeper<br/>(SELECT ... FOR UPDATE SKIP LOCKED)"]
-            SSEHub["Distributed SSE Hub<br/>(Pub/Sub Multiplexer)"]
+            ExpiryWorker["Reservation Sweeper<br/>SKIP LOCKED Worker"]
+            SSEHub["Distributed SSE Hub<br/>Pub/Sub Multiplexer"]
         end
     end
 
     subgraph DataPersistenceTier["Data & Cache Persistence Tier"]
         subgraph Neon["Neon Serverless PostgreSQL 16"]
-            PGPool["pgxpool Connection Pool (Max: 10)"]
-            Tables[("ACID Relational Tables<br/>Deterministic Lock Ordering<br/>Atomic Conditional UPDATEs")]
+            PGPool["pgxpool Connection Pool - Max: 10"]
+            Tables["ACID Relational Tables & Row Locks"]
         end
 
-        subgraph Aiven["Aiven Valkey 7 (Redis-Compatible)"]
-            ValkeyCache["Product Catalog Cache (TTL: 1h)"]
+        subgraph Aiven["Aiven Valkey 7 - Redis Compatible"]
+            ValkeyCache["Product Catalog Cache - TTL: 1h"]
             ValkeyRate["Sliding Window ZSETs"]
             ValkeyPubSub["Pub/Sub Topic: quickcart:order_events"]
         end
@@ -139,7 +139,7 @@ flowchart TD
     Storefront -->|REST API Requests| Router
     Storefront -->|Real-Time SSE Stream| Router
     SwaggerUI -->|HTTP Requests| Router
-    MobileClient -.->|REST / SSE| Router
+    MobileClient -->|REST & SSE Requests| Router
 
     Router --> Middlewares
     Middlewares --> CoreDomains
@@ -148,14 +148,15 @@ flowchart TD
     ChannelQueue --> WorkerPool
     WorkerPool --> PGPool
 
-    ExpiryWorker -.->|Sweeps every 1s (SKIP LOCKED)| PGPool
-    OrderSvc -->|Deterministic Sorted Lock Tx| PGPool
+    ExpiryWorker -->|Periodic SKIP LOCKED Sweeps| PGPool
+    OrderSvc -->|ACID CheckoutTx| PGPool
     AuthSvc -->|Atomic Hash Verification| PGPool
     CatalogSvc -->|Cache-Aside Check| ValkeyCache
-    CatalogSvc -.->|Cache Miss Fallback| PGPool
+    CatalogSvc -->|Cache Miss Fallback| PGPool
 
     OrderSvc -->|Publish State Events| SSEHub
-    SSEHub <-->|Distributed Bridge| ValkeyPubSub
+    SSEHub -->|Pub/Sub Bridge| ValkeyPubSub
+    ValkeyPubSub -->|Broadcast Events| SSEHub
     SSEHub -->|text/event-stream| Storefront
     PGPool --> Tables
 ```
@@ -329,16 +330,16 @@ The checkout process coordinates inventory validation, multi-item reservation, o
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Customer as 🛒 Customer
-    participant FE as 🌐 React 18 Storefront
-    participant API as ⚡ Gin Order Handler
-    participant Svc as ⚙️ Order Service
-    participant Repo as 🗄️ Order Repository
-    participant PG as 🐘 PostgreSQL 16 (ACID Tx)
-    participant Hub as 📡 SSE Hub (Pub/Sub)
+    actor Customer as Customer
+    participant FE as React 18 Storefront
+    participant API as Gin Order Handler
+    participant Svc as Order Service
+    participant Repo as Order Repository
+    participant PG as PostgreSQL 16 ACID Tx
+    participant Hub as SSE Hub PubSub
 
-    Customer->>FE: Click "Place Order" (Cart Items)
-    FE->>API: POST /api/v1/checkout (Idempotency-Key: uuid)
+    Customer->>FE: Click Place Order
+    FE->>API: POST /api/v1/checkout (Idempotency-Key)
     API->>Svc: Checkout(ctx, params)
     Svc->>Repo: CheckoutTx(ctx, params)
     
@@ -350,24 +351,24 @@ sequenceDiagram
         alt Insufficient Stock (0 rows affected)
             PG-->>Repo: pgx.ErrNoRows
             Repo->>PG: ROLLBACK
-            Repo-->>Svc: ErrInsufficientStock (ProductID, Available)
+            Repo-->>Svc: ErrInsufficientStock
             Svc-->>API: HTTP 409 Conflict
-            API-->>FE: {"error": "insufficient stock"}
+            API-->>FE: Return 409 Conflict
             FE-->>Customer: Display Stock Contention Dialog
         end
     end
 
-    Repo->>PG: INSERT INTO orders (user_id, store_id, total, idempotency_key, status='PLACED')
-    Repo->>PG: INSERT INTO order_items (...)
-    Repo->>PG: INSERT INTO inventory_reservations (..., status='RESERVED', expires_at=NOW()+10m)
-    Repo->>PG: INSERT INTO order_status_history (status='PLACED', actor='USER')
+    Repo->>PG: INSERT INTO orders (status: PLACED)
+    Repo->>PG: INSERT INTO order_items
+    Repo->>PG: INSERT INTO inventory_reservations (status: RESERVED)
+    Repo->>PG: INSERT INTO order_status_history (status: PLACED)
     Repo->>PG: DELETE FROM cart_items WHERE cart_id = $1
     Repo->>PG: COMMIT
 
-    Repo-->>Svc: *Order (Created)
-    Svc->>Hub: Publish(OrderEvent{Status: "PLACED"})
+    Repo-->>Svc: Order Created
+    Svc->>Hub: Publish OrderEvent
     Hub-->>FE: SSE Event: order_placed
-    Svc-->>API: *Order
+    Svc-->>API: Order Object
     API-->>FE: HTTP 201 Created (Order Response)
     FE-->>Customer: Navigate to /orders/:id/pay
 ```
