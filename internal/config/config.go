@@ -57,7 +57,7 @@ type Config struct {
 // Load loads application configuration from environment variables with safe defaults.
 func Load() (*Config, error) {
 	cfg := &Config{
-		ServerPort:         getEnv("SERVER_PORT", "8080"),
+		ServerPort:         getEnv("PORT", getEnv("SERVER_PORT", "8080")),
 		ServerHost:         getEnv("SERVER_HOST", "0.0.0.0"),
 		Environment:        Environment(getEnv("APP_ENV", string(EnvDevelopment))),
 		LogLevel:           strings.ToLower(getEnv("LOG_LEVEL", "info")),
