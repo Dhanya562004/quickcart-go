@@ -22,6 +22,7 @@ The application is deployed live in production as a modular monolith on **Render
 - [Concurrent Checkout Architecture](#concurrent-checkout-architecture)
 - [API Overview](#api-overview)
 - [Database Schema & ER Design](#database-design)
+- [React Shopping Frontend](#react-shopping-frontend)
 - [Reliability & Security](#reliability-and-security)
 - [Testing & Quality Assurance](#testing--quality-assurance)
 - [Local Development Setup](#local-development)
@@ -420,6 +421,104 @@ erDiagram
 
 ---
 
+## React Shopping Frontend
+
+A modern, responsive, consumer-grade shopping interface built in **React 18** and **TypeScript** with **Vite** and **Tailwind CSS**. Designed around the high-speed operational constraints of micro-fulfillment quick-commerce platforms, the application directly consumes the live production Go REST backend.
+
+### Frontend Technology Stack
+
+| Layer | Technology | Version | Purpose |
+| :--- | :--- | :--- | :--- |
+| **Framework** | React 18 | `18.3.1` | Declarative component UI |
+| **Language** | TypeScript | `5.6.3` | Type-safety & API contract verification |
+| **Build & Dev Tool** | Vite | `6.0.3` | Lightning-fast HMR & optimized production bundling |
+| **Styling** | Tailwind CSS | `3.4.16` | Fresh green palette, glassmorphism, micro-animations |
+| **Routing** | React Router | `6.28.0` | Client-side routing with protected route guards |
+| **Server State** | TanStack Query | `5.62.7` | Asynchronous caching, revalidation, and state query |
+| **HTTP Client** | Axios | `1.7.9` | Interceptors with concurrency-safe refresh token mutex |
+| **Icons** | Lucide React | `0.468.0` | Modern, clean vector iconography |
+| **Form Management**| React Hook Form & Zod | `7.54` / `3.24` | Validated customer registration and checkout forms |
+| **Testing** | Vitest & React Testing Library | `2.1.8` / `16.1.0` | High-fidelity DOM & mock interaction tests |
+
+### Key Features & Page Architecture
+
+1. **Shopping Homepage (`/`)**:
+   - Fresh green visual branding with delivery-themed hero section.
+   - Dark-store selector reflecting active fulfillment hubs.
+   - Category exploration chips and featured in-store products grid.
+   - Real-time Render web service health & readiness probe indicator.
+   - Shopping benefits showcasing 10-minute SLA, atomic row locking, and zero overselling.
+2. **Product Catalog & Dark Store Browsing (`/catalog`)**:
+   - Dark store switching with store-specific inventory quantities.
+   - Category filtering (`dairy-breakfast`, `fruits-vegetables`, etc.).
+   - Client-side search across product name, brand, and SKU.
+   - In-stock availability toggle and multi-criterion sorting (Price, Name, Featured).
+   - Interactive Product Detail modal with real-time stock levels.
+3. **Authentication & Session Management (`/login`, `/register`, `/account`)**:
+   - Customer signup with client-side and backend bcrypt validations.
+   - Login issuing short-lived access JWT (15-min) and refresh token (7-day).
+   - In-memory token management with silent refresh token rotation.
+   - Protected routes (`ProtectedRoute`) guarding checkout and account screens.
+4. **Shopping Cart Drawer**:
+   - Slide-over cart drawer with animated item badge.
+   - Add to cart, quantity increment/decrement, item deletion, and clear cart actions.
+   - Cross-store conflict resolution modal enforcing single-store fulfillment constraints.
+   - Transparent price calculation (subtotal, free delivery SLA, total in ₹).
+5. **Atomic Checkout (`/checkout`)**:
+   - Form-validated delivery address input.
+   - Generates unique, collision-resistant idempotency keys (`Idempotency-Key` header).
+   - Atomic backend stock reservation (`POST /api/v1/checkout`).
+   - Detailed handling for stock contention (`HTTP 409 Conflict`) displaying item name and remaining stock.
+6. **Simulated Payment Gateway (`/orders/:id/pay`)**:
+   - Clearly labeled demo payment simulation.
+   - Supports UPI (Default), Card, Netbanking, and Wallet payment options.
+   - Executes with server-side exponential backoff, jitter, and idempotency protection.
+7. **Live Real-Time Order Tracking (`/orders/:id/track`)**:
+   - Server-Sent Events (SSE) streaming (`GET /api/v1/orders/:id/events`).
+   - Secure header authentication (`Authorization: Bearer <token>`) without token exposure in URLs.
+   - 5-stage visual stepper (`PLACED` -> `CONFIRMED` -> `PACKING` -> `OUT_FOR_DELIVERY` -> `DELIVERED`).
+   - Connection status pill (Live Connected / Reconnecting / Offline) with 15-second heartbeat listener.
+   - Exponential backoff auto-reconnection and clean stream abort on component unmount.
+8. **Demo Preview Mode & Admin Seeding Banner**:
+   - Production database starts clean with 0 seeded items.
+   - Dedicated interactive guide with 1-click client-side isolated preview mode.
+   - Full cURL commands for authorized administrators to register dark stores, categories, products, and inventory.
+
+### Local Frontend Setup
+
+```bash
+# 1. Navigate to frontend directory
+cd frontend
+
+# 2. Install dependencies
+npm install
+
+# 3. Configure environment variables
+cp .env.example .env
+# Defaults to VITE_API_BASE_URL=https://quickcart-go.onrender.com
+
+# 4. Start Vite development server
+npm run dev
+
+# 5. Run test suite
+npm test
+
+# 6. Build optimized production bundle
+npm run build
+```
+
+### Environment Configuration (`frontend/.env.example`)
+
+```ini
+# Production Go Backend
+VITE_API_BASE_URL=https://quickcart-go.onrender.com
+
+# Local Go Backend (when running cmd/server locally)
+# VITE_API_BASE_URL=http://localhost:8080
+```
+
+---
+
 ## Reliability and Security
 
 | Category | Mechanism | Implementation Detail |
@@ -547,7 +646,7 @@ docker compose -f deployments/docker-compose.yml up --build -d
 - [ ] **Distributed Load Benchmarking**: Execute k6 load tests against multi-region cloud deployments to measure WAN latency profiles.
 - [ ] **OpenTelemetry Instrumentation**: Distributed trace propagation across HTTP handlers, SQL queries, and Redis operations via OpenTelemetry and Jaeger.
 - [ ] **Webhook Dispatcher**: External merchant webhook worker pool with exponential retry queues and dead-letter storage.
-- [ ] **Web Shopping Frontend**: Modern customer-facing storefront built in React / Next.js / TypeScript interacting with the live Render API.
+- [x] **Web Shopping Frontend**: Modern customer-facing storefront built in React 18, TypeScript, Vite, Tailwind CSS, TanStack Query, and Lucide React interacting with the live Render API.
 
 ---
 

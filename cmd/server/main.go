@@ -187,7 +187,7 @@ func SetupRouter(
 	r.Use(middleware.RequestID())
 	r.Use(middleware.StructuredLogger(log))
 	r.Use(middleware.Recovery(log))
-	r.Use(middleware.CORS())
+	r.Use(middleware.CORS(cfg.CORSAllowedOrigins...))
 	r.Use(metrics.Middleware())
 
 	// Prometheus Metrics endpoint with production protection

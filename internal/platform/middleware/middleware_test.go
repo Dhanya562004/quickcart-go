@@ -111,17 +111,67 @@ func TestCORSMiddleware(t *testing.T) {
 		c.String(http.StatusOK, "pong")
 	})
 
-	// Preflight OPTIONS
+	// Preflight OPTIONS without Origin (e.g. basic tool)
 	wOpt := httptest.NewRecorder()
 	reqOpt, _ := http.NewRequest(http.MethodOptions, "/ping", nil)
 	r.ServeHTTP(wOpt, reqOpt)
 	assert.Equal(t, http.StatusNoContent, wOpt.Code)
 	assert.Equal(t, "*", wOpt.Header().Get("Access-Control-Allow-Origin"))
+	assert.Empty(t, wOpt.Header().Get("Access-Control-Allow-Credentials")) // Never wildcard + credentials
 
-	// Actual GET
+	// Actual GET without Origin
 	wGet := httptest.NewRecorder()
 	reqGet, _ := http.NewRequest(http.MethodGet, "/ping", nil)
 	r.ServeHTTP(wGet, reqGet)
 	assert.Equal(t, http.StatusOK, wGet.Code)
 	assert.Equal(t, "*", wGet.Header().Get("Access-Control-Allow-Origin"))
+	assert.Empty(t, wGet.Header().Get("Access-Control-Allow-Credentials"))
+
+	// Preflight with Origin echoes origin and permits credentials
+	wOptOrigin := httptest.NewRecorder()
+	reqOptOrigin, _ := http.NewRequest(http.MethodOptions, "/ping", nil)
+	reqOptOrigin.Header.Set("Origin", "http://localhost:5173")
+	r.ServeHTTP(wOptOrigin, reqOptOrigin)
+	assert.Equal(t, http.StatusNoContent, wOptOrigin.Code)
+	assert.Equal(t, "http://localhost:5173", wOptOrigin.Header().Get("Access-Control-Allow-Origin"))
+	assert.Equal(t, "true", wOptOrigin.Header().Get("Access-Control-Allow-Credentials"))
+	assert.Equal(t, "Origin", wOptOrigin.Header().Get("Vary"))
+	assert.Contains(t, wOptOrigin.Header().Get("Access-Control-Allow-Headers"), "Authorization")
+	assert.Contains(t, wOptOrigin.Header().Get("Access-Control-Allow-Headers"), "Idempotency-Key")
 }
+
+func TestCORSMiddleware_ScopedOrigins(t *testing.T) {
+	r := gin.New()
+	r.Use(CORS("https://quickcart.app", "http://localhost:5173"))
+	r.GET("/items", func(c *gin.Context) {
+		c.String(http.StatusOK, "ok")
+	})
+
+	// Allowed origin 1
+	w1 := httptest.NewRecorder()
+	req1, _ := http.NewRequest(http.MethodGet, "/items", nil)
+	req1.Header.Set("Origin", "http://localhost:5173")
+	r.ServeHTTP(w1, req1)
+	assert.Equal(t, http.StatusOK, w1.Code)
+	assert.Equal(t, "http://localhost:5173", w1.Header().Get("Access-Control-Allow-Origin"))
+	assert.Equal(t, "true", w1.Header().Get("Access-Control-Allow-Credentials"))
+
+	// Allowed origin 2
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest(http.MethodGet, "/items", nil)
+	req2.Header.Set("Origin", "https://quickcart.app")
+	r.ServeHTTP(w2, req2)
+	assert.Equal(t, http.StatusOK, w2.Code)
+	assert.Equal(t, "https://quickcart.app", w2.Header().Get("Access-Control-Allow-Origin"))
+	assert.Equal(t, "true", w2.Header().Get("Access-Control-Allow-Credentials"))
+
+	// Disallowed origin
+	wDisallowed := httptest.NewRecorder()
+	reqDisallowed, _ := http.NewRequest(http.MethodGet, "/items", nil)
+	reqDisallowed.Header.Set("Origin", "https://malicious-site.com")
+	r.ServeHTTP(wDisallowed, reqDisallowed)
+	assert.Equal(t, http.StatusOK, wDisallowed.Code)
+	assert.Empty(t, wDisallowed.Header().Get("Access-Control-Allow-Origin"))
+	assert.Empty(t, wDisallowed.Header().Get("Access-Control-Allow-Credentials"))
+}
+

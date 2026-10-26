@@ -91,13 +91,48 @@ func Recovery(log *slog.Logger) gin.HandlerFunc {
 	}
 }
 
-// CORS applies essential cross-origin headers.
-func CORS() gin.HandlerFunc {
+// CORS applies scoped cross-origin headers with configurable allowed origins.
+// When allowedOrigins is empty or contains "*", it permits any origin while ensuring
+// that wildcard "*" is never combined with Access-Control-Allow-Credentials: true (satisfying W3C CORS spec).
+// When specific origins are supplied, incoming request Origin headers are validated against the allowlist.
+func CORS(allowedOrigins ...string) gin.HandlerFunc {
+	allowAll := len(allowedOrigins) == 0
+	allowedMap := make(map[string]bool, len(allowedOrigins))
+	for _, o := range allowedOrigins {
+		if o == "*" {
+			allowAll = true
+		} else {
+			allowedMap[o] = true
+		}
+	}
+
 	return func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With, Idempotency-Key, X-Request-ID")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE, PATCH")
+		reqOrigin := c.GetHeader("Origin")
+		var isAllowed bool
+		var matchedOrigin string
+
+		if allowAll {
+			isAllowed = true
+			if reqOrigin != "" {
+				matchedOrigin = reqOrigin
+			} else {
+				matchedOrigin = "*"
+			}
+		} else if reqOrigin != "" && allowedMap[reqOrigin] {
+			isAllowed = true
+			matchedOrigin = reqOrigin
+		}
+
+		if isAllowed {
+			c.Writer.Header().Set("Access-Control-Allow-Origin", matchedOrigin)
+			if matchedOrigin != "*" {
+				c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+				c.Writer.Header().Add("Vary", "Origin")
+			}
+			c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With, Idempotency-Key, X-Request-ID")
+			c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE, PATCH")
+			c.Writer.Header().Set("Access-Control-Max-Age", "86400")
+		}
 
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)
