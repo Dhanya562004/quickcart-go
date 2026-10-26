@@ -181,3 +181,45 @@ fly logs
    * The new pod passes `/readyz` dependency checks (DB ping & Redis ping) before receiving traffic.
 3. **Graceful Shutdown**:
    * Upon receiving `SIGTERM`, QuickCart halts HTTP listeners, waits up to `SHUTDOWN_TIMEOUT` (10s) to drain active requests, terminates the reservation expiry sweep worker, and gracefully drains background job queues without dropping in-flight orders.
+
+---
+
+## 6. Render Free Deployment Guide (with Neon PostgreSQL & Aiven Valkey)
+
+### Overview
+QuickCart is ready for native deployment on Render Free as a Go Web Service connected to Neon Free PostgreSQL and Aiven Valkey Free.
+
+### Render Web Service Settings
+| Field | Value | Notes |
+| :--- | :--- | :--- |
+| **Runtime** | `Go` | Native Go runtime |
+| **Branch** | `main` | Production branch |
+| **Build Command** | `go build -tags netgo -ldflags '-s -w' -o app ./cmd/server` | Fast compilation of static binary |
+| **Start Command** | `./app` | Runs application server |
+| **Plan** | Free | 512 MB RAM / 0.1 CPU |
+| **Health Check Path**| `/healthz` | Unauthenticated liveness probe |
+
+### Environment Variables Configuration
+| Variable | Required | Production Value / Example | Notes |
+| :--- | :---: | :--- | :--- |
+| `APP_ENV` | Yes | `production` | Enforces release mode and security validations |
+| `LOG_LEVEL` | Yes | `info` | Production structured JSON logging |
+| `DATABASE_URL` | Yes | `postgres://user:pass@ep-xyz.us-east-2.aws.neon.tech/neondb?sslmode=require` | Neon connection string with TLS |
+| `DB_MAX_CONNS` | Yes | `10` | Sized conservatively for Neon Free tier |
+| `DB_MIN_CONNS` | Yes | `2` | Minimum idle connections |
+| `REDIS_URL` | Yes | `rediss://default:pass@valkey-xyz.aivencloud.com:12345` | Aiven Valkey connection string (`rediss://` enables TLS) |
+| `JWT_SECRET` | Yes | *(Min 32 characters random secret)* | Enforced cryptographically in production |
+| `METRICS_TOKEN` | Yes | *(Secure random string)* | Protects `GET /metrics` |
+| `SERVER_HOST` | No | `0.0.0.0` | Defaults to `0.0.0.0` |
+| `PORT` | Auto | *Supplied automatically by Render* | QuickCart automatically binds to Render's dynamic `$PORT` |
+
+### Database Migrations
+Run schema migrations against Neon before launching:
+```bash
+# Using golang-migrate
+migrate -path migrations/ -database "$DATABASE_URL" up
+
+# Or using psql directly
+psql "$DATABASE_URL" -f migrations/000001_init_schema.up.sql
+psql "$DATABASE_URL" -f migrations/000002_auth_refresh_tokens.up.sql
+```

@@ -151,3 +151,15 @@ func TestConfig_EnvironmentOverrides(t *testing.T) {
 	assert.Equal(t, 10*time.Second, cfg.ShutdownTimeout)
 	assert.Equal(t, "127.0.0.1:9090", cfg.Address())
 }
+
+func TestConfig_PortEnvOverride(t *testing.T) {
+	// Render provides PORT. Ensure PORT takes precedence over SERVER_PORT.
+	t.Setenv("PORT", "10000")
+	t.Setenv("SERVER_PORT", "9090")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+
+	assert.Equal(t, "10000", cfg.ServerPort)
+	assert.Equal(t, "0.0.0.0:10000", cfg.Address())
+}
