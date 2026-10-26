@@ -129,6 +129,23 @@ func TestSetupRouter_RateLimiting_FailOpen_WhenRedisNil(t *testing.T) {
 	}
 }
 
+func TestSetupRouter_RootRedirect(t *testing.T) {
+	cfg := &config.Config{
+		Environment: config.EnvDevelopment,
+		LogLevel:    "info",
+		ServerPort:  "8080",
+	}
+
+	router := SetupRouter(cfg, getTestLogger(), nil, nil, nil, nil)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusFound, w.Code)
+	assert.Equal(t, "/docs", w.Header().Get("Location"))
+}
+
 func TestSetupRouter_DocsAndOpenAPI(t *testing.T) {
 	cfg := &config.Config{
 		Environment: config.EnvDevelopment,
@@ -151,6 +168,8 @@ func TestSetupRouter_DocsAndOpenAPI(t *testing.T) {
 	router.ServeHTTP(wSpec, reqSpec)
 	assert.Equal(t, http.StatusOK, wSpec.Code)
 	assert.Contains(t, wSpec.Body.String(), "openapi: 3.0.3")
+	assert.Contains(t, wSpec.Body.String(), "https://quickcart-go.onrender.com")
+	assert.Contains(t, wSpec.Body.String(), "http://localhost:8080")
 }
 
 func TestSetupRouter_MetricsProtection(t *testing.T) {
