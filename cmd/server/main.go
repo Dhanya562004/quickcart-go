@@ -193,6 +193,11 @@ func SetupRouter(
 	// Prometheus Metrics endpoint with production protection
 	r.GET("/metrics", metrics.AuthMiddleware(cfg.MetricsToken, string(cfg.Environment)), metrics.Handler())
 
+	// Root endpoint redirects to interactive Swagger UI documentation
+	r.GET("/", func(c *gin.Context) {
+		c.Redirect(http.StatusFound, "/docs")
+	})
+
 	// OpenAPI 3.0 Specification and Swagger UI Documentation
 	r.GET("/docs", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")

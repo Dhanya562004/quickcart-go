@@ -11,12 +11,25 @@ info:
     url: https://github.com/Dhanya562004/quickcart-go
 
 servers:
+  - url: https://quickcart-go.onrender.com
+    description: Production
   - url: http://localhost:8080
-    description: Local Development Server
-  - url: https://api.quickcart.internal
-    description: Production Cluster Gateway
+    description: Local Development
 
 paths:
+  /:
+    get:
+      summary: Root redirect to documentation
+      description: Redirects visitors to interactive Swagger UI documentation at /docs.
+      responses:
+        '302':
+          description: Temporary redirect to /docs
+          headers:
+            Location:
+              schema:
+                type: string
+                example: /docs
+
   /healthz:
     get:
       summary: Liveness probe
