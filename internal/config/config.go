@@ -52,6 +52,9 @@ type Config struct {
 	JWTAccessTTL   time.Duration `json:"jwt_access_ttl"`
 	JWTRefreshTTL  time.Duration `json:"jwt_refresh_ttl"`
 	MetricsToken   string        `json:"metrics_token"`
+
+	// CORS Configuration
+	CORSAllowedOrigins []string `json:"cors_allowed_origins"`
 }
 
 // Load loads application configuration from environment variables with safe defaults.
@@ -77,6 +80,7 @@ func Load() (*Config, error) {
 		JWTAccessTTL:       getEnvDuration("JWT_ACCESS_TTL", 15*time.Minute),
 		JWTRefreshTTL:      getEnvDuration("JWT_REFRESH_TTL", 7*24*time.Hour),
 		MetricsToken:       getEnv("METRICS_TOKEN", "quickcart-metrics-scrape-token"),
+		CORSAllowedOrigins: parseOrigins(getEnv("CORS_ALLOWED_ORIGINS", getEnv("ALLOWED_ORIGINS", "*"))),
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -187,4 +191,18 @@ func getEnvDuration(key string, defaultVal time.Duration) time.Duration {
 		return defaultVal
 	}
 	return d
+}
+
+func parseOrigins(raw string) []string {
+	var origins []string
+	for _, o := range strings.Split(raw, ",") {
+		o = strings.TrimSpace(o)
+		if o != "" {
+			origins = append(origins, o)
+		}
+	}
+	if len(origins) == 0 {
+		return []string{"*"}
+	}
+	return origins
 }
